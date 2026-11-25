@@ -84,6 +84,7 @@ finally
 await LauncherContentTests.RunAsync();
 await ChinaContentTests.RunAsync();
 GameIndexTests.Run();
+await GameIndexTests.RunReleaseAsync();
 await GameFileDownloadTests.RunAsync();
 await GameInstallTests.RunAsync();
 await GameInstallerHostTests.RunAsync();

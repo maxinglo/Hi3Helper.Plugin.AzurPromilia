@@ -44,7 +44,8 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
     public override string ZoneLogoUrl => _region.LogoUrl;
     public override string ZonePosterUrl => _media.PosterUrl;
     public override string ZoneHomePageUrl => _region.Website;
-    public override GameReleaseChannel ReleaseChannel => GameReleaseChannel.Public;
+    // Show the same BETA badge as Wuthering Waves for every Azur Promilia region.
+    public override GameReleaseChannel ReleaseChannel => GameReleaseChannel.OpenBeta;
     public override string GameMainLanguage => _region.Language;
     public override string LauncherGameDirectoryName => _region.ProfileName;
     public override List<string> SupportedLanguages => [_region.Language];

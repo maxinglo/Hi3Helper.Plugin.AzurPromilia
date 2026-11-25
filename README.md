@@ -13,9 +13,11 @@ Shows official Azur Promilia news, events, and community links in Collapse Launc
 
 1. Download the plugin ZIP from the [GitHub releases](https://github.com/maxinglo/Hi3Helper.Plugin.AzurPromilia/releases).
 2. Import the ZIP in Collapse Launcher under **Settings → Plugin Management**, then restart Collapse.
-3. Select Azur Promilia and your region. If Collapse asks for an install folder, select the folder that contains the official launcher installation, including any launcher version folders.
+3. Select Azur Promilia and your region. For mainland China, select the existing game folder containing `AzurPromilia.exe` (or its official launcher parent folder). For other regions, select the official launcher installation if available.
 
-Collapse opens a recognized official launcher. If one is unavailable, Collapse opens the region's publisher website. Game installation, updates, repairs, and sign-in currently use the publisher's application.
+For mainland China, **Start Game** launches the installed game directly with `-start=azurpromilia_launcher`, without opening the official launcher or modifying `union_pcsdk.dll`. Collapse tracks the actual game process and waits until it exits. Custom launch arguments are passed to the game; add `-force-d3d12` in Collapse's game settings to request DirectX 12. Stopping Collapse's wait does not terminate the game.
+
+The direct launch was verified with the mainland China game version `1.0.0.30` and its original SDK. Other regions still open a recognized official launcher or the publisher website. Game release discovery, downloading, installation and updates are not yet connected to the publisher's live release feeds; use the publisher's application for these operations until region-specific acceptance is complete.
 
 ## Plugin updates
 

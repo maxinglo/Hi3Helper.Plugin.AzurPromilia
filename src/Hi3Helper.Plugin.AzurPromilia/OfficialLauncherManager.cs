@@ -100,6 +100,23 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
 
     internal void OpenOfficialLauncher() => Process.Start(_locator.CreateStartInfo(GetLauncherSearchPath()))?.Dispose();
 
+    internal Task<bool> LaunchGameAsync(string? arguments, bool boosted, ProcessPriorityClass priority, CancellationToken token)
+    {
+        if (region.NativeGameExecutable is not null)
+        {
+            string executable = GetInstalledExecutablePath()
+                ?? throw new InvalidOperationException("Select the installed game directory before starting the game.");
+            return InstalledGameLauncher.RunAsync(executable, arguments, boosted, priority, token);
+        }
+
+        return Task.Run(() =>
+        {
+            token.ThrowIfCancellationRequested();
+            OpenOfficialLauncher();
+            return true;
+        }, token);
+    }
+
     internal string? FindLocalOfficialLauncherDirectory() => _locator.FindExisting(GetLauncherSearchPath(), requireLocalFile: true);
 
     internal string? GetInstalledExecutablePath() =>

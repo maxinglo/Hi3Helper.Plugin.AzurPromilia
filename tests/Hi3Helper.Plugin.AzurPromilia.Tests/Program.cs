@@ -130,6 +130,7 @@ await GameIndexTests.RunReleaseAsync();
 await GameFileDownloadTests.RunAsync();
 await GameInstallTests.RunAsync();
 await GameInstallerHostTests.RunAsync();
+await GameLaunchTests.RunAsync();
 Console.WriteLine("PASS: Region presets, publisher websites, and official launcher identity checks.");
 
 static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps;

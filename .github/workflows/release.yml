@@ -1,0 +1,162 @@
+name: Release Azur Promilia plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Plugin version with three or four numeric components
+        required: true
+        type: string
+      mirror_existing_release:
+        description: Repair the OSS mirror from an existing stable GitHub Release
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [azur-promilia-stable-oss-mirror]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azur-promilia-release-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      MIRROR_EXISTING_RELEASE: ${{ inputs.mirror_existing_release }}
+    steps:
+      - name: Validate the release branch and version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -cnotin @('refs/heads/stable', 'refs/heads/preview')) {
+            throw 'Run on stable for a formal release or preview for a prerelease.'
+          }
+          if ($env:MIRROR_EXISTING_RELEASE -eq 'true' -and $env:GITHUB_REF -ne 'refs/heads/stable') {
+            throw 'Only stable releases can be mirrored to OSS.'
+          }
+          if ($env:RELEASE_VERSION -notmatch '\A[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?\z') {
+            throw 'Version must contain three or four numeric components.'
+          }
+
+  release:
+    needs: validate
+    if: ${{ !inputs.mirror_existing_release }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Run the launcher integration tests
+        shell: pwsh
+        run: dotnet run --project tests/Hi3Helper.Plugin.AzurPromilia.Tests -c Release -p:Platform=x64 -p:RestoreLockedMode=true
+      - name: Build or retrieve the versioned installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/Publish-GitHubInstaller.ps1 -Version $env:RELEASE_VERSION
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: artifacts/packages/AzurPromilia_${{ inputs.version }}_Release.zip
+          archive: false
+          if-no-files-found: error
+
+  update-feed:
+    name: Publish the GitHub auto-update feed
+    if: github.ref == 'refs/heads/stable'
+    needs: release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Publish the stable installer assets to the fixed update feed
+        shell: pwsh
+        run: |
+          $installer = ./scripts/Get-GitHubInstaller.ps1 -Version $env:RELEASE_VERSION
+          ./scripts/Expand-PluginPackage.ps1 -ArchivePath $installer -UpdateDirectory artifacts/update-feed
+          ./scripts/Publish-GitHubUpdateFeed.ps1 -Repository $env:GITHUB_REPOSITORY -UpdateDirectory artifacts/update-feed -Version $env:RELEASE_VERSION -Commit $env:GITHUB_SHA
+
+  request-mirror:
+    name: Request the stable OSS mirror
+    if: >-
+      ${{ !cancelled() && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/stable' && needs.validate.result == 'success' &&
+          (needs.update-feed.result == 'success' ||
+           (inputs.mirror_existing_release && needs.update-feed.result == 'skipped')) }}
+    needs: [validate, update-feed]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Dispatch the mirror on the default branch
+        shell: pwsh
+        run: |
+          $request = @{
+            event_type = 'azur-promilia-stable-oss-mirror'
+            client_payload = @{ version = $env:RELEASE_VERSION }
+          } | ConvertTo-Json -Compress
+          $request | gh api --method POST "repos/$env:GITHUB_REPOSITORY/dispatches" --input -
+          if ($LASTEXITCODE -ne 0) { throw 'Could not dispatch the OSS mirror.' }
+
+  mirror:
+    name: Publish and verify the OSS mirror through ESA
+    if: github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ github.event.client_payload.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the formal release and prepare the update assets
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_VERSION -notmatch '\A[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?\z') {
+            throw 'Version must contain three or four numeric components.'
+          }
+          git merge-base --is-ancestor "refs/tags/v$env:RELEASE_VERSION" refs/remotes/origin/stable
+          if ($LASTEXITCODE -ne 0) { throw 'The installer tag must point to a commit in stable history.' }
+          $installer = ./scripts/Get-GitHubInstaller.ps1 -Version $env:RELEASE_VERSION
+          ./scripts/Expand-PluginPackage.ps1 -ArchivePath $installer -UpdateDirectory artifacts/update-feed
+      - uses: aliyun/setup-aliyun-cli-action@09a5f86915bb556e27bf050e9a5e339aeb073df5 # v1
+        with:
+          version: 3.5.1
+      - name: Add the Alibaba Cloud CLI to PATH
+        shell: pwsh
+        run: (Get-Item -LiteralPath 'out/aliyun.exe').DirectoryName >> $env:GITHUB_PATH
+      - uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
+        with:
+          oidc-provider-arn: ${{ vars.ALIBABA_CLOUD_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.ALIBABA_CLOUD_OSS_ROLE_ARN }}
+      - name: Upload the stable installer and the auto-update feed
+        shell: pwsh
+        run: |
+          ./scripts/Publish-OssMirror.ps1 -Tag "v$env:RELEASE_VERSION" `
+            -Installer "artifacts/packages/AzurPromilia_${env:RELEASE_VERSION}_Release.zip" -UpdateDirectory artifacts/update-feed

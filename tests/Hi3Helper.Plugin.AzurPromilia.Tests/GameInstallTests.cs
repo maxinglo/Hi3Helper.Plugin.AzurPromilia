@@ -14,6 +14,7 @@ internal static class GameInstallTests
         {
             await TestResumeAndInstallAsync(temporary.FullName);
             await TestMirrorFailoverAsync(Path.Combine(temporary.FullName, "mirror"));
+            await TestSingleCdnRestartAsync(Path.Combine(temporary.FullName, "single-cdn"));
             await TestUnmanagedConflictAsync(Path.Combine(temporary.FullName, "conflict"));
             await TestInsufficientSpaceAsync(Path.Combine(temporary.FullName, "full-disk"));
         }
@@ -179,6 +180,36 @@ internal static class GameInstallTests
             "Progress must remove invalid staged bytes before counting the clean download.");
         Require(VerifiedGameInstaller.ReadInstalledVersion(root, update.Profile) == update.Version &&
                 (await File.ReadAllBytesAsync(destination)).SequenceEqual(newBytes), "Only verified staging can replace the installed file.");
+    }
+
+    private static async Task TestSingleCdnRestartAsync(string root)
+    {
+        byte[] contents = [1, 2, 3, 4, 5];
+        GameFile file = FileEntry("game/asset.bin", "asset.bin", contents);
+        GameInstallPlan plan = Plan(new Version(1, 0), 'a', [file]);
+        string staging = Path.Combine(root, ".collapse-azurpromilia", "stage", plan.Profile,
+            plan.Version.ToString(), plan.IndexSha256);
+        Directory.CreateDirectory(staging);
+        await File.WriteAllBytesAsync(Path.Combine(staging, "00000000.part"), [9, 9]);
+
+        var ranges = new List<string?>();
+        using var http = Client(request =>
+        {
+            ranges.Add(request.Headers.Range?.ToString());
+            if (request.Headers.Range is null)
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(contents) };
+
+            var remainder = new ByteArrayContent(contents[2..]);
+            remainder.Headers.ContentRange = new ContentRangeHeaderValue(2, 4, contents.Length);
+            return new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = remainder };
+        });
+
+        var installer = new VerifiedGameInstaller(http);
+        await installer.InstallAsync(root, plan, null, CancellationToken.None);
+        Require(ranges.SequenceEqual(["bytes=2-4", null]) &&
+                (await File.ReadAllBytesAsync(Path.Combine(root, file.InstallPath))).SequenceEqual(contents) &&
+                VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) == plan.Version,
+            "A CDN must get a clean transfer after a corrupted resume even if there are no mirrors.");
     }
 
     private static async Task TestUnmanagedConflictAsync(string root)

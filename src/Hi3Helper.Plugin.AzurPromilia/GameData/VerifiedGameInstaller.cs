@@ -128,7 +128,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             }).ConfigureAwait(false);
     }
 
-    // Give a mirror one clean attempt if the staged prefix fails verification after a resume.
+    // Give the CDN one clean attempt if the staged prefix fails verification after a resume.
     private async Task DownloadFileAsync(Operation operation, DownloadJob job, Action<long> progress, CancellationToken token)
     {
         int source = 0;
@@ -153,7 +153,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                 await VerifiedGameFileDownloader.DownloadAsync(http, url, partial, file, Report, token).ConfigureAwait(false);
                 return;
             }
-            catch (Exception error) when (operation.CdnRoots.Count > 1 && GameCdn.IsTransferFailure(error, token))
+            catch (Exception error) when (GameCdn.IsTransferFailure(error, token))
             {
                 if (resumed && staged == 0 && error is InvalidDataException)
                     continue;
@@ -283,9 +283,10 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
     private static HashSet<string> ReadOwnedFiles(Operation operation, GameInstallPlan plan)
     {
         Marker? pending = ReadMarker(operation.Root, PendingMarker, hasFiles: false);
+        // A pending commit grants no file ownership; a later release may proceed only under the existing inventory checks.
         if (pending is not null && (!pending.Profile.Equals(plan.Profile, StringComparison.OrdinalIgnoreCase) ||
-            pending.Version != plan.Version || !pending.IndexSha256.Equals(plan.IndexSha256, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException("Resume the pending game version in this directory before selecting another version.");
+            plan.Version < pending.Version))
+            throw new InvalidOperationException("The pending game version belongs to another region or is newer than the selected version.");
 
         Marker? installed = ReadMarker(operation.Root, InstalledMarker, hasFiles: true);
         if (installed is not null && !installed.Profile.Equals(plan.Profile, StringComparison.OrdinalIgnoreCase))

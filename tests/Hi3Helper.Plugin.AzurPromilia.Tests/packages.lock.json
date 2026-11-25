@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net11.0-windows7.0": {
+      "AzurPromilia": {
+        "type": "Project",
+        "dependencies": {
+          "Hi3Helper.Plugin.Core": "[1.0.0, )"
+        }
+      },
+      "hi3helper.plugin.core": {
+        "type": "Project"
+      }
+    }
+  }
+}

@@ -4,7 +4,15 @@ using System.Text;
 
 namespace Hi3Helper.Plugin.AzurPromilia.GameData;
 
-internal sealed record GameFile(long Size, string Md5, string InstallPath, string RemotePath);
+internal sealed record GameFile(long Size, string? Md5, string InstallPath, string RemotePath)
+{
+    internal ulong? Crc64 { get; private init; }
+
+    internal bool HasValidChecksum => Crc64.HasValue || Md5 is { Length: 32 } hash && hash.All(char.IsAsciiHexDigit);
+
+    internal static GameFile WithCrc64(long size, ulong crc64, string installPath, string remotePath) =>
+        new(size, null, installPath, remotePath) { Crc64 = crc64 };
+}
 
 internal sealed record ManjuuGameIndex(
     IReadOnlyList<GameFile> Files, IReadOnlyList<string> Directories, long TotalBytes)

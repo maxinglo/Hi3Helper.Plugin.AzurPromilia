@@ -15,6 +15,7 @@ internal static class GameInstallTests
             await TestResumeAndInstallAsync(temporary.FullName);
             await TestMirrorFailoverAsync(Path.Combine(temporary.FullName, "mirror"));
             await TestSingleCdnRestartAsync(Path.Combine(temporary.FullName, "single-cdn"));
+            await TestCrc64InstallationAsync(Path.Combine(temporary.FullName, "crc64"));
             await TestUnmanagedConflictAsync(Path.Combine(temporary.FullName, "conflict"));
             await TestInsufficientSpaceAsync(Path.Combine(temporary.FullName, "full-disk"));
         }
@@ -106,7 +107,8 @@ internal static class GameInstallTests
                     throw new InvalidOperationException("Replacing a locked Windows file unexpectedly succeeded.");
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-                Require(VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) is null,
+                Require(VerifiedGameInstaller.HasPendingInstallation(root) &&
+                        VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) is null,
                     "A failed commit must leave a pending marker and hide the installed version.");
                 Require(await installer.GetDownloadSizesAsync(root, update, CancellationToken.None) == (3L, 3L),
                     "A failed commit must keep verified staging available to the same plan.");
@@ -117,7 +119,8 @@ internal static class GameInstallTests
         {
             var installer = new VerifiedGameInstaller(http);
             await installer.InstallAsync(root, update, null, CancellationToken.None);
-            Require(VerifiedGameInstaller.ReadInstalledVersion(root, update.Profile) == update.Version &&
+            Require(!VerifiedGameInstaller.HasPendingInstallation(root) &&
+                    VerifiedGameInstaller.ReadInstalledVersion(root, update.Profile) == update.Version &&
                     (await File.ReadAllBytesAsync(destination)).SequenceEqual(replacement),
                 "Retrying an interrupted commit must apply the staged bytes and publish the new version.");
 
@@ -210,6 +213,54 @@ internal static class GameInstallTests
                 (await File.ReadAllBytesAsync(Path.Combine(root, file.InstallPath))).SequenceEqual(contents) &&
                 VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) == plan.Version,
             "A CDN must get a clean transfer after a corrupted resume even if there are no mirrors.");
+    }
+
+    private static async Task TestCrc64InstallationAsync(string root)
+    {
+        // This four-byte resource and its CRC come from Yostar's live JP 1.0.2 manifest and CDN.
+        const string path = "AzurPromiliaJP_Data/StreamingAssets/.res/raw_streaming_package/06ujhj4pltkkp3tyowbnng.r";
+        const ulong publishedCrc64 = 17628643879108190027UL;
+        byte[] contents = [0, 0, 0, 0];
+        GameFile file = GameFile.WithCrc64(contents.Length, publishedCrc64, path, path);
+        var plan = new GameInstallPlan("AzurPromiliaJP", new Version(1, 0, 2), new string('a', 64), BaseUri, [file], []);
+
+        string staging = Path.Combine(root, ".collapse-azurpromilia", "stage", plan.Profile,
+            plan.Version.ToString(), plan.IndexSha256);
+        Directory.CreateDirectory(staging);
+        await File.WriteAllBytesAsync(Path.Combine(staging, "00000000.part"), contents[..2]);
+        using (var http = Client(request =>
+               {
+                   Require(request.Headers.Range?.ToString() == "bytes=2-3", "The CRC64 file must resume its staged prefix.");
+                   var remainder = new ByteArrayContent(contents[2..]);
+                   remainder.Headers.ContentRange = new ContentRangeHeaderValue(2, 3, contents.Length);
+                   return new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = remainder };
+               }))
+        {
+            var installer = new VerifiedGameInstaller(http);
+            await installer.InstallAsync(root, plan, null, CancellationToken.None);
+            Require(VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) == plan.Version,
+                "A correctly resumed CRC64 file must install successfully.");
+        }
+
+        GameInstallPlan update = plan with
+        {
+            Version = new Version(1, 0, 3),
+            IndexSha256 = new string('b', 64),
+            Files = [GameFile.WithCrc64(contents.Length, publishedCrc64 ^ 1, path, path)]
+        };
+        using var wrong = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(contents) });
+        var rejecting = new VerifiedGameInstaller(wrong);
+        try
+        {
+            await rejecting.InstallAsync(root, update, null, CancellationToken.None);
+            throw new InvalidOperationException("A payload with the wrong CRC64 was accepted.");
+        }
+        catch (InvalidDataException) { }
+
+        Require(await rejecting.GetDownloadSizesAsync(root, update, CancellationToken.None) == (4L, 0L) &&
+                VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) == plan.Version &&
+                (await File.ReadAllBytesAsync(Path.Combine(root, path))).SequenceEqual(contents),
+            "A rejected CRC64 transfer must discard the bad staging and retain the installed version.");
     }
 
     private static async Task TestUnmanagedConflictAsync(string root)

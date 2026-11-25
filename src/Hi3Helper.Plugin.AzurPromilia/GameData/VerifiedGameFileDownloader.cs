@@ -8,6 +8,8 @@ namespace Hi3Helper.Plugin.AzurPromilia.GameData;
 internal static class VerifiedGameFileDownloader
 {
     private const int BufferSize = 128 * 1024;
+    private const ulong Crc64ReflectedPolynomial = 0xC96C5795D7870F42;
+    private static readonly ulong[] Crc64Table = CreateCrc64Table();
 
     internal static async Task DownloadAsync(HttpClient http, Uri downloadUri, string partialPath, GameFile file,
         Action<long>? reportDownloadedSize, CancellationToken token)
@@ -72,7 +74,7 @@ internal static class VerifiedGameFileDownloader
             token.ThrowIfCancellationRequested();
             partial.SetLength(0);
             reportDownloadedSize?.Invoke(0);
-            throw new InvalidDataException("The downloaded game file does not match the manifest size and MD5.");
+            throw new InvalidDataException("The downloaded game file does not match the manifest size and checksum.");
         }
     }
 
@@ -155,7 +157,44 @@ internal static class VerifiedGameFileDownloader
             return false;
 
         stream.Position = 0;
+        if (file.Crc64 is { } expectedCrc64)
+            return await ComputeCrc64Async(stream, token).ConfigureAwait(false) == expectedCrc64;
+
         byte[] digest = await MD5.HashDataAsync(stream, token).ConfigureAwait(false);
         return Convert.ToHexString(digest).Equals(file.Md5, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The Yostar manifest uses CRC-64/XZ with reflected input and an all-ones initial and final XOR value.
+    private static async Task<ulong> ComputeCrc64Async(Stream stream, CancellationToken token)
+    {
+        ulong state = ulong.MaxValue;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        try
+        {
+            int read;
+            while ((read = await stream.ReadAsync(buffer.AsMemory(0, BufferSize), token).ConfigureAwait(false)) != 0)
+            {
+                foreach (byte value in buffer.AsSpan(0, read))
+                    state = (state >> 8) ^ Crc64Table[(byte)(state ^ value)];
+            }
+            return ~state;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static ulong[] CreateCrc64Table()
+    {
+        var table = new ulong[256];
+        for (int index = 0; index < table.Length; index++)
+        {
+            ulong entry = (ulong)index;
+            for (int bit = 0; bit < 8; bit++)
+                entry = (entry >> 1) ^ ((entry & 1) != 0 ? Crc64ReflectedPolynomial : 0);
+            table[index] = entry;
+        }
+        return table;
     }
 }

@@ -69,12 +69,28 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         File.Delete(Resolve(operation.Root, PendingMarker));
     }
 
+    internal static bool HasPendingInstallation(string installPath)
+    {
+        try
+        {
+            return HasPendingMarker(NormalizeRoot(installPath));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or
+                                   InvalidDataException or UnauthorizedAccessException)
+        {
+            // Do not fall back to the publisher's older version if the plugin's marker cannot be inspected safely.
+            return true;
+        }
+    }
+
+    private static bool HasPendingMarker(string root) => GetAttributes(Resolve(root, PendingMarker)) is not null;
+
     internal static Version? ReadInstalledVersion(string installPath, string profile)
     {
         try
         {
             string root = NormalizeRoot(installPath);
-            if (GetAttributes(Resolve(root, PendingMarker)) is not null)
+            if (HasPendingMarker(root))
                 return null;
             Marker? installed = ReadMarker(root, InstalledMarker, hasFiles: true);
             return installed is not null && string.Equals(installed.Profile, profile, StringComparison.OrdinalIgnoreCase)
@@ -259,7 +275,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             GameFile entry = plan.Files[index];
             ValidateRelativePath(entry.InstallPath);
             ValidateRelativePath(entry.RemotePath, remote: true);
-            if (entry.Size < 0 || !IsHex(entry.Md5, 32) || !pathKinds.TryAdd(entry.InstallPath, false))
+            if (entry.Size < 0 || !entry.HasValidChecksum || !pathKinds.TryAdd(entry.InstallPath, false))
                 throw new InvalidDataException("The game install plan contains an invalid or duplicate file.");
 
             string remotePath = string.Join('/', entry.RemotePath.Split('/').Select(Uri.EscapeDataString));

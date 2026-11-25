@@ -30,14 +30,27 @@ internal static class ChinaGameReleaseSource
         Func<string?> findVerifiedLauncherDirectory)
     {
         token.ThrowIfCancellationRequested();
-        LauncherConfiguration? configuration = null;
-        if (findVerifiedLauncherDirectory() is { } directory)
-        {
-            try { configuration = ReadLauncherConfiguration(directory); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-        }
+        LauncherConfiguration? configuration = ReadLocalConfiguration(findVerifiedLauncherDirectory,
+            ReadLauncherConfiguration, IsChinaConfiguration);
         configuration ??= await ChinaLauncherBootstrap.LoadAsync(http, token).ConfigureAwait(false);
         return await LoadAsync(http, configuration, token).ConfigureAwait(false);
+    }
+
+    internal static T? ReadLocalConfiguration<T>(Func<string?> find, Func<string, T> read, Predicate<T>? matches = null)
+        where T : class
+    {
+        try
+        {
+            if (find() is not { } directory)
+                return null;
+
+            T configuration = read(directory);
+            return matches is null || matches(configuration) ? configuration : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+        {
+            return null;
+        }
     }
 
     internal static async Task<GameInstallPlan> LoadAsync(HttpClient http, LauncherConfiguration configuration,
@@ -182,7 +195,7 @@ internal static class ChinaGameReleaseSource
         byte[] indexKey, byte[] indexIv)
     {
         const string chinaNativeSha256 = "6a487a372e73f8bc8b46124b134c60b17ac8465711d71584d55890cc5b0d1a78";
-        const string taiwanNativeSha256 = "8cd346e3f1320485f266678289bae9879128c3ac32f0360543643def993f9bd";
+        const string taiwanNativeSha256 = "8cd346e3f1320485f266678289baae9879128c3ac32f0360543643def993f9bd";
         const long keyOffset = 0x5FBEA8;
         const int ivSize = 16;
         // Read the configuration format parameter only from the matching publisher binary.

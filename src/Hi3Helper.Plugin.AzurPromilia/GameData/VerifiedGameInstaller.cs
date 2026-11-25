@@ -4,7 +4,8 @@ using System.Text.Json;
 namespace Hi3Helper.Plugin.AzurPromilia.GameData;
 
 // Install only files listed in the official launcher index. The game manages its supplemental resources and shaders.
-internal sealed class VerifiedGameInstaller(HttpClient http)
+internal sealed class VerifiedGameInstaller(HttpClient http,
+    Func<string, GameInstallPlan, IReadOnlyList<GameFile>>? readOfficialInventory = null)
 {
     private const string Workspace = ".collapse-azurpromilia";
     private const string PendingMarker = Workspace + "/pending.json";
@@ -15,8 +16,8 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         CancellationToken token)
     {
         Operation operation = CreateOperation(installPath, plan);
-        HashSet<string> owned = ReadOwnedFiles(operation, plan);
-        var batch = await PrepareAsync(operation, owned, token).ConfigureAwait(false);
+        var (owned, pending) = ReadOwnership(operation, plan);
+        var batch = await PrepareAsync(operation, plan, owned, pending, token).ConfigureAwait(false);
         return (batch.Total, batch.Downloaded);
     }
 
@@ -29,14 +30,18 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         await using var operationLock = new FileStream(Resolve(operation.Root, OperationLock), FileMode.OpenOrCreate,
             FileAccess.ReadWrite, FileShare.None);
 
-        HashSet<string> owned = ReadOwnedFiles(operation, plan);
-        var batch = await PrepareAsync(operation, owned, token).ConfigureAwait(false);
+        var (owned, pending) = ReadOwnership(operation, plan);
+        var batch = await PrepareAsync(operation, plan, owned, pending, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         EnsureStagingSpace(operation.Root, batch.RemainingStagingBytes);
         await StageAsync(operation, batch, progress, token).ConfigureAwait(false);
 
         token.ThrowIfCancellationRequested();
-        WriteMarker(operation.Root, PendingMarker, plan, files: null);
+        // Preserve checksums before moving any files so a later release can resume an interrupted commit safely.
+        IEnumerable<GameFile> checksums = pending.Concat(plan.Files)
+            .Concat(batch.Jobs.Select(job => job.Previous).OfType<GameFile>())
+            .Select(file => file with { RemotePath = string.Empty }).Distinct();
+        WriteMarker(operation.Root, PendingMarker, plan, files: null, checksums);
         foreach (string directory in plan.Directories)
         {
             token.ThrowIfCancellationRequested();
@@ -51,6 +56,12 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             destination = Resolve(operation.Root, job.File.Entry.InstallPath);
             string partial = Resolve(operation.Root, job.File.PartialPath);
             bool previouslyOwned = owned.Contains(job.File.Entry.InstallPath);
+            if (job.Previous is { } previous && GetAttributes(destination) is not null)
+            {
+                if (!await VerifiedGameFileDownloader.VerifyAsync(destination, previous, token).ConfigureAwait(false))
+                    throw new IOException("An existing file changed after its game inventory was verified.");
+                previouslyOwned = true;
+            }
             File.Move(partial, destination, overwrite: previouslyOwned);
         }
 
@@ -179,8 +190,8 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         }
     }
 
-    private static async Task<DownloadBatch> PrepareAsync(Operation operation, HashSet<string> owned,
-        CancellationToken token)
+    private async Task<DownloadBatch> PrepareAsync(Operation operation, GameInstallPlan plan, HashSet<string> owned,
+        IReadOnlyList<GameFile> pending, CancellationToken token)
     {
         var parentDirectories = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (string directory in operation.Directories)
@@ -195,11 +206,14 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         long total = 0;
         long downloaded = 0;
         long remainingStagingBytes = 0;
+        ILookup<string, GameFile>? prior = null;
+        ILookup<string, GameFile>? official = null;
         foreach (FileLocation file in operation.Files)
         {
             token.ThrowIfCancellationRequested();
             string destination = ResolvePath(operation.Root, file.Entry.InstallPath);
             FileAttributes? attributes = Probe(destination, parentDirectories);
+            GameFile? previous = null;
             if (attributes is { } present)
             {
                 if ((present & FileAttributes.Directory) != 0)
@@ -207,7 +221,19 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                 if (await VerifiedGameFileDownloader.VerifyAsync(destination, file.Entry, token).ConfigureAwait(false))
                     continue;
                 if (!owned.Contains(file.Entry.InstallPath))
-                    throw new IOException("An existing unowned file conflicts with the game index.");
+                {
+                    prior ??= pending.ToLookup(entry => entry.InstallPath, StringComparer.OrdinalIgnoreCase);
+                    previous = await MatchInventoryAsync(prior[file.Entry.InstallPath], destination, token).ConfigureAwait(false);
+                    if (previous is null)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        official ??= (readOfficialInventory?.Invoke(operation.Root, plan) ?? [])
+                            .ToLookup(entry => entry.InstallPath, StringComparer.OrdinalIgnoreCase);
+                        previous = await MatchInventoryAsync(official[file.Entry.InstallPath], destination, token).ConfigureAwait(false);
+                    }
+                    if (previous is null)
+                        throw new IOException("An existing unowned file conflicts with the game index.");
+                }
             }
 
             string partial = ResolvePath(operation.Root, file.PartialPath);
@@ -216,9 +242,21 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             total = checked(total + file.Entry.Size);
             downloaded = checked(downloaded + cached);
             remainingStagingBytes = checked(remainingStagingBytes + (file.Entry.Size - stagingCredit));
-            jobs.Add(new DownloadJob(file, cached));
+            jobs.Add(new DownloadJob(file, cached, previous));
         }
         return new DownloadBatch(jobs, total, downloaded, remainingStagingBytes);
+    }
+
+    private static async Task<GameFile?> MatchInventoryAsync(IEnumerable<GameFile> inventory, string destination,
+        CancellationToken token)
+    {
+        foreach (GameFile candidate in inventory)
+        {
+            if (candidate.HasValidChecksum &&
+                await VerifiedGameFileDownloader.VerifyAsync(destination, candidate, token).ConfigureAwait(false))
+                return candidate;
+        }
+        return null;
     }
 
     private static async Task<(long Downloaded, long StagingCredit)> GetCachedSizeAsync(string path,
@@ -296,10 +334,10 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         return new Operation(root, stageDirectory, cdnRoots, files, directories);
     }
 
-    private static HashSet<string> ReadOwnedFiles(Operation operation, GameInstallPlan plan)
+    private static (HashSet<string> Owned, IReadOnlyList<GameFile> Pending) ReadOwnership(Operation operation, GameInstallPlan plan)
     {
         Marker? pending = ReadMarker(operation.Root, PendingMarker, hasFiles: false);
-        // A pending commit grants no file ownership; a later release may proceed only under the existing inventory checks.
+        // A pending commit grants ownership only to files that still match a recorded checksum.
         if (pending is not null && (!pending.Profile.Equals(plan.Profile, StringComparison.OrdinalIgnoreCase) ||
             plan.Version < pending.Version))
             throw new InvalidOperationException("The pending game version belongs to another region or is newer than the selected version.");
@@ -309,7 +347,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             throw new InvalidOperationException("The game directory is managed by a different region.");
         if (installed is not null && plan.Version < installed.Version)
             throw new InvalidOperationException("The selected game version is older than the installed version.");
-        return installed?.Files ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return (installed?.Files ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase), pending?.Checksums ?? []);
     }
 
     private static Marker? ReadMarker(string root, string relativePath, bool hasFiles)
@@ -338,10 +376,38 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                 ValidateRelativePath(relative);
             }
         }
-        return new Marker(profile, version, indexHash, files);
+        return new Marker(profile, version, files, hasFiles ? [] : ReadChecksums(data));
     }
 
-    private static void WriteMarker(string root, string target, GameInstallPlan plan, HashSet<string>? files)
+    private static IReadOnlyList<GameFile> ReadChecksums(JsonElement data)
+    {
+        if (!data.TryGetProperty("checksums", out JsonElement rows))
+            return [];
+        if (rows.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("The pending game install marker has an invalid inventory.");
+
+        var checksums = new List<GameFile>(rows.GetArrayLength());
+        foreach (JsonElement row in rows.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object || !ReadString(row, "path", out string relative) ||
+                !row.TryGetProperty("size", out JsonElement sizeField) || sizeField.ValueKind != JsonValueKind.Number ||
+                !sizeField.TryGetInt64(out long size) || size < 0)
+                throw new InvalidDataException("The pending game install marker has an invalid file entry.");
+
+            ValidateRelativePath(relative);
+            if (row.TryGetProperty("crc64", out JsonElement crcField) && crcField.ValueKind == JsonValueKind.Number &&
+                crcField.TryGetUInt64(out ulong crc))
+                checksums.Add(GameFile.WithCrc64(size, crc, relative, string.Empty));
+            else if (ReadString(row, "md5", out string digest) && IsHex(digest, 32))
+                checksums.Add(new GameFile(size, digest, relative, string.Empty));
+            else
+                throw new InvalidDataException("The pending game install marker has an invalid file checksum.");
+        }
+        return checksums;
+    }
+
+    private static void WriteMarker(string root, string target, GameInstallPlan plan, HashSet<string>? files,
+        IEnumerable<GameFile>? checksums = null)
     {
         string temporary = Resolve(root, $"{Workspace}/{Guid.NewGuid():N}.tmp");
         try
@@ -358,6 +424,22 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                     writer.WriteStartArray("files");
                     foreach (string path in files.Order(StringComparer.OrdinalIgnoreCase))
                         writer.WriteStringValue(path);
+                    writer.WriteEndArray();
+                }
+                if (checksums is not null)
+                {
+                    writer.WriteStartArray("checksums");
+                    foreach (GameFile file in checksums)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("path", file.InstallPath);
+                        writer.WriteNumber("size", file.Size);
+                        if (file.Crc64 is { } crc64)
+                            writer.WriteNumber("crc64", crc64);
+                        else
+                            writer.WriteString("md5", file.Md5);
+                        writer.WriteEndObject();
+                    }
                     writer.WriteEndArray();
                 }
                 writer.WriteEndObject();
@@ -461,7 +543,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
 
     private sealed record Operation(string Root, string StageDirectory, List<Uri> CdnRoots, FileLocation[] Files, HashSet<string> Directories);
     private sealed record FileLocation(GameFile Entry, string PartialPath, string EscapedRemotePath);
-    private sealed record DownloadJob(FileLocation File, long Cached);
+    private sealed record DownloadJob(FileLocation File, long Cached, GameFile? Previous);
     private sealed record DownloadBatch(List<DownloadJob> Jobs, long Total, long Downloaded, long RemainingStagingBytes);
-    private sealed record Marker(string Profile, Version Version, string IndexSha256, HashSet<string> Files);
+    private sealed record Marker(string Profile, Version Version, HashSet<string> Files, IReadOnlyList<GameFile> Checksums);
 }

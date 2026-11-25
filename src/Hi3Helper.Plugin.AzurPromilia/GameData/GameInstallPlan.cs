@@ -13,6 +13,8 @@ internal sealed record GameInstallPlan(
     internal GameInstallPlan(string profile, Version version, string indexSha256, Uri baseUri,
         IReadOnlyList<GameFile> files, IReadOnlyList<string> directories)
         : this(profile, version, indexSha256, [baseUri], files, directories) { }
+
+    internal (ReadOnlyMemory<byte> Key, ReadOnlyMemory<byte> Iv)? OfficialIndexFormat { get; init; }
 }
 
 internal static class GameCdn

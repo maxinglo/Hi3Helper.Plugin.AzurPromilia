@@ -13,19 +13,23 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
 {
     private readonly OfficialLauncherLocator _locator = new(region);
     private GameInstallPlan? _installPlan;
+    private GameReleaseRequest? _releaseRequest;
 
     protected override HttpClient ApiResponseHttpClient { get; set; } = new(new SocketsHttpHandler { AllowAutoRedirect = false });
     protected override bool HasPreload => false;
     protected override bool HasUpdate => UsesNativeInstallation && IsInstalled &&
         ApiGameVersion > CurrentGameVersion;
 
-    protected override bool IsInstalled => UsesNativeInstallation || region.ManjuuGameDirectoryName is not null
+    protected override bool IsInstalled => UsesNativeInstallation || OfficialGameDirectoryName is not null
         ? CurrentGameVersion != GameVersion.Empty &&
           CurrentGameInstallPath is { Length: > 0 } directory && region.NativeGameExecutable is { } executable &&
           File.Exists(Path.Combine(directory, executable))
         : _locator.FindCandidate(CurrentGameInstallPath) is not null;
 
     internal bool UsesNativeInstallation => region.LoadGameInstallPlan is not null;
+
+    private string? OfficialGameDirectoryName => region.ManjuuGameDirectoryName ??
+        (region.ProfileName == AzurPromiliaRegion.Japan.ProfileName ? JapanGameReleaseSource.GameTag : null);
 
     // A native installation only consumes a verified release for the chosen server.
     internal GameInstallPlan RequireInstallPlan() => Volatile.Read(ref _installPlan)
@@ -40,10 +44,11 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
         }
         if (version is null && (!UsesNativeInstallation || string.IsNullOrWhiteSpace(CurrentGameInstallPath) ||
                 !VerifiedGameInstaller.HasPendingInstallation(CurrentGameInstallPath)) &&
-            FindManjuuInstallation(CurrentGameInstallPath) is { } installed)
+            FindOfficialInstallation(CurrentGameInstallPath) is { } installed)
         {
             CurrentGameInstallPath = installed.Path;
-            version = installed.Version;
+            if (!UsesNativeInstallation || !VerifiedGameInstaller.HasPendingInstallation(installed.Path))
+                version = installed.Version;
         }
         CurrentGameVersion = version is null ? GameVersion.Empty : new GameVersion(version.ToString());
     }
@@ -66,7 +71,12 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
 
         try
         {
-            GameInstallPlan plan = await load(ApiResponseHttpClient, token, FindLocalOfficialLauncherVersionDirectory).ConfigureAwait(false);
+            GameReleaseRequest request;
+            using (ThisInstanceLock.EnterScope())
+                request = _releaseRequest ??= new GameReleaseRequest(inner =>
+                    load(ApiResponseHttpClient, inner, FindLocalOfficialLauncherVersionDirectory));
+            GameInstallPlan plan = await request.GetAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
             if (!string.Equals(plan.Profile, region.ProfileName, StringComparison.Ordinal) ||
                 region.NativeGameExecutable is not { } executable ||
                 !plan.Files.Any(file => string.Equals(file.InstallPath, executable, StringComparison.OrdinalIgnoreCase)))
@@ -93,11 +103,11 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
         {
             if (UsesNativeInstallation && IsInstalled)
                 return CurrentGameInstallPath;
-            if (region.ManjuuGameDirectoryName is null)
+            if (OfficialGameDirectoryName is null)
                 return UsesNativeInstallation ? null : _locator.FindExisting(CurrentGameInstallPath);
 
-            return FindManjuuInstallation(CurrentGameInstallPath)?.Path ??
-                FindManjuuInstallation(_locator.FindExisting(GetLauncherSearchPath()))?.Path;
+            return FindOfficialInstallation(CurrentGameInstallPath)?.Path ??
+                FindOfficialInstallation(_locator.FindExisting(GetLauncherSearchPath()))?.Path;
         }, token);
 
     internal void OpenOfficialLauncher() => Process.Start(_locator.CreateStartInfo(GetLauncherSearchPath()))?.Dispose();
@@ -131,45 +141,77 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
             ? Path.GetFullPath(Path.Combine(directory, executable))
             : null;
 
-    private (string Path, Version Version)? FindManjuuInstallation(string? candidate)
+    public override void Dispose()
     {
-        if (region.ManjuuGameDirectoryName is not { } folder || region.NativeGameExecutable is not { } executable ||
-            region.Launcher is not { } launcher || string.IsNullOrWhiteSpace(candidate) || !Path.IsPathFullyQualified(candidate))
+        using (ThisInstanceLock.EnterScope())
+        {
+            _releaseRequest?.Dispose();
+            _releaseRequest = null;
+        }
+        base.Dispose();
+    }
+
+    internal IReadOnlyList<GameFile> ReadOfficialInventory(string directory, GameInstallPlan plan)
+    {
+        if (plan.Profile != region.ProfileName || region.NativeGameExecutable is not { } executable ||
+            ReadOfficialVersion(directory) is not { } version || version > plan.Version)
+            return [];
+
+        try
+        {
+            if (region.ManjuuGameDirectoryName is null)
+                return OfficialGameInventory.ReadJapan(directory, executable, version);
+
+            return plan.OfficialIndexFormat is { } format
+                ? OfficialGameInventory.ReadManjuu(directory, executable, version, format.Key, format.Iv)
+                : [];
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            SharedStatic.InstanceLogger.LogWarning(error, "Could not read the installed {Profile} publisher inventory.", region.ProfileName);
+            return [];
+        }
+    }
+
+    private (string Path, Version Version)? FindOfficialInstallation(string? candidate)
+    {
+        if (OfficialGameDirectoryName is not { } folder || string.IsNullOrWhiteSpace(candidate) || !Path.IsPathFullyQualified(candidate))
             return null;
 
-        return Read(candidate) ?? Read(Path.Combine(candidate, folder));
+        if (ReadOfficialVersion(candidate) is { } version)
+            return (candidate, version);
 
-        (string Path, Version Version)? Read(string directory)
+        string child = Path.Combine(candidate, folder);
+        return ReadOfficialVersion(child) is { } childVersion ? (child, childVersion) : null;
+    }
+
+    private Version? ReadOfficialVersion(string directory)
+    {
+        if (OfficialGameDirectoryName is null || region.NativeGameExecutable is not { } executable || region.Launcher is not { } launcher)
+            return null;
+
+        string game = Path.Combine(directory, executable);
+        string data = Path.Combine(directory, Path.GetFileNameWithoutExtension(executable) + "_Data");
+        if (!File.Exists(game) || !Directory.Exists(data))
+            return null;
+
+        try
         {
-            string game = Path.Combine(directory, executable);
-            string data = Path.Combine(directory, Path.GetFileNameWithoutExtension(executable) + "_Data");
-            string index = Path.Combine(directory, "_index");
-            if (!File.Exists(game) || !Directory.Exists(data) || !File.Exists(Path.Combine(index, "version")))
-                return null;
-
-            try
-            {
-                using FileStream input = File.OpenRead(Path.Combine(index, "version"));
-                using JsonDocument marker = JsonDocument.Parse(input);
-                if (marker.RootElement.ValueKind != JsonValueKind.Object ||
-                    !marker.RootElement.TryGetProperty("version", out JsonElement entry) || entry.ValueKind != JsonValueKind.String ||
-                    !Version.TryParse(entry.GetString(), out Version? version) ||
-                    !File.Exists(Path.Combine(index, version.ToString())) || !Authenticode.IsSignedBy(game, launcher.Signer))
-                    return null;
-
-                return (directory, version);
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-            {
-                return null;
-            }
+            Version? version = region.ManjuuGameDirectoryName is null
+                ? OfficialGameInventory.ReadJapanVersion(directory, executable)
+                : OfficialGameInventory.ReadManjuuVersion(directory);
+            return version is not null && Authenticode.IsSignedBy(game, launcher.Signer) ? version : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
         }
     }
 
     private string? GetLauncherSearchPath()
     {
         string? directory = CurrentGameInstallPath;
-        if (directory is not null && region.ManjuuGameDirectoryName is { } folder &&
+        if (directory is not null && OfficialGameDirectoryName is { } folder &&
             string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(directory)), folder, StringComparison.OrdinalIgnoreCase))
             return Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory));
 

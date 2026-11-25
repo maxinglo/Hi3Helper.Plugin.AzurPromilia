@@ -19,7 +19,7 @@ internal sealed partial class OfficialLauncherInstaller : GameInstallerBase
         if (manager.UsesNativeInstallation)
         {
             _assetClient = new HttpClient(assetHandler ?? new SocketsHttpHandler { AllowAutoRedirect = false });
-            _nativeInstaller = new VerifiedGameInstaller(_assetClient);
+            _nativeInstaller = new VerifiedGameInstaller(_assetClient, manager.ReadOfficialInventory);
         }
     }
 

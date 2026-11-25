@@ -37,11 +37,11 @@ public sealed partial class AzurPromiliaPlugin : PluginBase
     public override void GetPluginName(out string result) => result = GameDisplayName;
 
     public override void GetPluginDescription(out string result) => result = Localize(
-        "Browse official Azur Promilia news, events, and community links for each region.",
-        "在 Collapse Launcher 查看《蓝色星原：旅谣》各区服的官方资讯、活动与社区。",
-        "Collapse Launcher で『アズールプロミリア』各地域の公式ニュース、イベント、コミュニティを確認できます。",
-        "在 Collapse Launcher 查看《藍色星原：旅謠》各區服的官方資訊、活動與社群。",
-        "Collapse Launcher에서 아주르 프로밀리아의 지역별 공식 소식, 이벤트, 커뮤니티를 확인할 수 있습니다.");
+        "Download, update and launch Azur Promilia for China, Japan and Taiwan, with official news and events.",
+        "在 Collapse Launcher 下载、更新和启动《蓝色星原：旅谣》国服、日服和台服，查看官方资讯与活动。",
+        "Collapse Launcher で『アズールプロミリア』の中国・日本・台湾版をダウンロード、更新、起動し、公式ニュースやイベントを確認できます。",
+        "在 Collapse Launcher 下載、更新和啟動《藍色星原：旅謠》國服、日服和台服，查看官方資訊與活動。",
+        "Collapse Launcher에서 아주르 프로밀리아 중국·일본·대만 클라이언트를 다운로드, 업데이트 및 실행하고 공식 소식과 이벤트를 확인할 수 있습니다.");
 
     public override void GetPluginAuthor(out string result) => result = "Maxing";
 

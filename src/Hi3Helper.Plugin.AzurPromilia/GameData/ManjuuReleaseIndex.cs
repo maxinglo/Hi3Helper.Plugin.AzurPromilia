@@ -82,7 +82,10 @@ internal static class ManjuuReleaseIndex
                 ManjuuGameIndex parsed = ManjuuGameIndex.ReadEncrypted(input, formatKey.Span, iv.Span);
                 token.ThrowIfCancellationRequested();
                 Uri[] orderedRoots = [root, .. allowedRoots.Select(source => source.Root).Where(other => other != root)];
-                return new GameInstallPlan(profile, version, identity, orderedRoots, parsed.Files, parsed.Directories);
+                return new GameInstallPlan(profile, version, identity, orderedRoots, parsed.Files, parsed.Directories)
+                {
+                    OfficialIndexFormat = (formatKey, iv)
+                };
             }
 
             throw new InvalidDataException("The publisher's verified package index is unavailable from its configured CDNs.", failure);

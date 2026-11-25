@@ -49,7 +49,8 @@ internal sealed record AzurPromiliaRegion(
         "https://webusstatic.yo-star.com/azurpromilia-jp/azurpromilia-jp-official-2026/prod/azurpromiliajpofficial2026/azurpromilia-bannerRGB.png",
         JapanLauncherContentSource.LoadAsync,
         new OfficialLauncherIdentity("AZUPRO_JP_Gamelauncher.exe", "AZUPRO_JP_Gamelauncher", "Yostar, Inc."),
-        KoreanName: "일본");
+        KoreanName: "일본", NativeGameExecutable: "AzurPromiliaJP.exe",
+        LoadGameInstallPlan: JapanGameReleaseSource.LoadAsync);
 
     internal static AzurPromiliaRegion Taiwan { get; } = new(
         "AzurPromiliaTW", "Taiwan", "台服", "台湾版", "zh-TW", "JIMI",
@@ -57,15 +58,10 @@ internal sealed record AzurPromiliaRegion(
         "https://webstatic.jimi-global.com/web/static/azurpromilia.jimi-global.com/home/assets/poster-C-PmzHX_.jpg",
         "https://plat-cdn.manjuu.com/p3-SocialMedia/20240314-104900.png",
         TaiwanLauncherContentSource.LoadAsync,
-        KoreanName: "대만");
+        new OfficialLauncherIdentity("launcher.exe", "藍色星原：旅謠", "JIMI PTE. LTD.", VersionedDirectory: true),
+        KoreanName: "대만", NativeGameExecutable: "AzurPromilia.exe", ManjuuGameDirectoryName: "AzurPromilia_TC_game",
+        LoadGameInstallPlan: TaiwanGameReleaseSource.LoadAsync);
 
-    internal static AzurPromiliaRegion Korea { get; } = new(
-        "AzurPromiliaKR", "Korea", "韩服", "韓国版", "ko-KR", "Nexon",
-        "https://azurpromilia.nexon.com/main",
-        "https://azurpromilia-web.dn.nexoncdn.co.kr/home_73685DA/main/bg_poster.jpg",
-        "https://azurpromilia-web.dn.nexoncdn.co.kr/home_73685DA/common/img_logo_white.png",
-        KoreaLauncherContentSource.LoadAsync,
-        TraditionalChineseName: "韓服", KoreanName: "한국");
-
-    internal static IReadOnlyList<AzurPromiliaRegion> All { get; } = [China, Japan, Taiwan, Korea];
+    // Expose only mainland China, Japan and Taiwan presets.
+    internal static IReadOnlyList<AzurPromiliaRegion> All { get; } = [China, Japan, Taiwan];
 }

@@ -13,7 +13,7 @@
     <AssemblyName>AzurPromilia</AssemblyName>
     <Version>0.2.0</Version>
     <Authors>Maxing</Authors>
-    <Description>Azur Promilia support for Collapse Launcher, including direct launch of the installed mainland China game.</Description>
+    <Description>Download, update, verify and launch the China, Japan and Taiwan editions of Azur Promilia in Collapse Launcher.</Description>
     <DebugType>embedded</DebugType>
     <Deterministic>true</Deterministic>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

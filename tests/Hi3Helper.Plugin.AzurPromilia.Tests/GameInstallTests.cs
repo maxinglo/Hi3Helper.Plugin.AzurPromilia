@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text;
 using Hi3Helper.Plugin.AzurPromilia.GameData;
 
 internal static class GameInstallTests
@@ -16,6 +17,9 @@ internal static class GameInstallTests
             await TestMirrorFailoverAsync(Path.Combine(temporary.FullName, "mirror"));
             await TestSingleCdnRestartAsync(Path.Combine(temporary.FullName, "single-cdn"));
             await TestCrc64InstallationAsync(Path.Combine(temporary.FullName, "crc64"));
+            await TestOfficialUpdateAsync(Path.Combine(temporary.FullName, "official-update"));
+            await TestPendingReleaseChangeAsync(Path.Combine(temporary.FullName, "pending-release-change"));
+            TestJapanInventory(Path.Combine(temporary.FullName, "japan-inventory"));
             await TestUnmanagedConflictAsync(Path.Combine(temporary.FullName, "conflict"));
             await TestInsufficientSpaceAsync(Path.Combine(temporary.FullName, "full-disk"));
         }
@@ -261,6 +265,117 @@ internal static class GameInstallTests
                 VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) == plan.Version &&
                 (await File.ReadAllBytesAsync(Path.Combine(root, path))).SequenceEqual(contents),
             "A rejected CRC64 transfer must discard the bad staging and retain the installed version.");
+    }
+
+    private static async Task TestOfficialUpdateAsync(string root)
+    {
+        const string executable = "AzurPromilia.exe";
+        byte[] older = [1, 2, 3];
+        byte[] newer = [3, 2, 1];
+        var oldVersion = new Version(1, 0);
+        GameFile oldFile = FileEntry(executable, executable, older);
+        GameInstallPlan plan = Plan(new Version(1, 1), 'b', [FileEntry(executable, executable, newer)]);
+        string index = Path.Combine(root, "_index");
+        Directory.CreateDirectory(index);
+        await File.WriteAllTextAsync(Path.Combine(index, "version"), """{"version":"1.0"}""");
+        using Aes cipher = Aes.Create();
+        cipher.KeySize = 192;
+        string listing = $"1,1,0\n0,{oldFile.Size},{oldFile.Md5},{executable},{executable}\n";
+        byte[] encoded = cipher.EncryptCbc(Encoding.UTF8.GetBytes(listing), cipher.IV);
+        await File.WriteAllTextAsync(Path.Combine(index, oldVersion.ToString()), Convert.ToBase64String(encoded));
+        string destination = Path.Combine(root, executable);
+        await File.WriteAllBytesAsync(destination, [9, 9, 9]);
+        using var http = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(newer) });
+        var installer = new VerifiedGameInstaller(http, (directory, _) =>
+            OfficialGameInventory.ReadManjuu(directory, executable, oldVersion, cipher.Key, cipher.IV));
+
+        try
+        {
+            await installer.GetDownloadSizesAsync(root, plan, CancellationToken.None);
+            throw new InvalidOperationException("An official inventory granted ownership without checking the existing bytes.");
+        }
+        catch (IOException) { }
+
+        await File.WriteAllBytesAsync(destination, older);
+        Require(await installer.GetDownloadSizesAsync(root, plan, CancellationToken.None) == (newer.Length, 0L),
+            "An official old client must be eligible for updates without an existing Collapse marker.");
+        await installer.InstallAsync(root, plan, null, CancellationToken.None);
+        Require((await File.ReadAllBytesAsync(destination)).SequenceEqual(newer) &&
+            VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) == plan.Version &&
+            OfficialGameInventory.ReadManjuuVersion(root) == oldVersion,
+            "Updating an official install must preserve its metadata and record the new Collapse version.");
+    }
+
+    private static async Task TestPendingReleaseChangeAsync(string root)
+    {
+        Directory.CreateDirectory(root);
+        byte[] md5Payload = [1, 2, 3];
+        byte[] crcPayload = "123456789"u8.ToArray();
+        byte[] payload = [7, 7, 7];
+        string conflict = Path.Combine(root, "conflict.bin");
+        GameInstallPlan first = Plan(new Version(1, 0), 'b',
+        [
+            FileEntry("md5.bin", "md5.bin", md5Payload),
+            GameFile.WithCrc64(crcPayload.Length, 0x995DC9BBDF1939FA, "crc64.bin", "crc64.bin"),
+            FileEntry("conflict.bin", "conflict.bin", payload)
+        ]);
+
+        using var firstClient = Client(request =>
+        {
+            string name = Path.GetFileName(request.RequestUri!.AbsolutePath);
+            if (name == "conflict.bin")
+                File.WriteAllText(conflict, "External file");
+            byte[] body = name switch
+            {
+                "md5.bin" => md5Payload,
+                "crc64.bin" => crcPayload,
+                _ => payload
+            };
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) };
+        });
+        try
+        {
+            await new VerifiedGameInstaller(firstClient).InstallAsync(root, first, null, CancellationToken.None);
+            throw new InvalidOperationException("A competing file must interrupt the commit.");
+        }
+        catch (IOException) { }
+
+        Require(VerifiedGameInstaller.HasPendingInstallation(root) &&
+            File.Exists(Path.Combine(root, "md5.bin")) && File.Exists(Path.Combine(root, "crc64.bin")),
+            "Both verified files must be committed before the conflicting file interrupts installation.");
+        GameInstallPlan next = Plan(new Version(1, 1), 'c', first.Files
+            .Select(file => FileEntry(file.InstallPath, file.RemotePath, payload)).ToArray());
+        using var nextClient = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(payload) });
+        var installer = new VerifiedGameInstaller(nextClient);
+        try
+        {
+            await installer.GetDownloadSizesAsync(root, next, CancellationToken.None);
+            throw new InvalidOperationException("The pending journal granted ownership of an unrelated conflicting file.");
+        }
+        catch (IOException) { }
+
+        Require(await File.ReadAllTextAsync(conflict) == "External file", "The unrelated file must remain intact.");
+        File.Delete(conflict);
+        await installer.InstallAsync(root, next, null, CancellationToken.None);
+        Require(!VerifiedGameInstaller.HasPendingInstallation(root) &&
+            VerifiedGameInstaller.ReadInstalledVersion(root, next.Profile) == next.Version &&
+            next.Files.All(file => File.ReadAllBytes(Path.Combine(root, file.InstallPath)).SequenceEqual(payload)),
+            "The next release must safely replace both MD5 and CRC64 files from the interrupted installation.");
+    }
+
+    private static void TestJapanInventory(string root)
+    {
+        const string executable = "AzurPromiliaJP.exe";
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "game-launcher-config.json"),
+            """{"tag":"AZUPRO_JP","name":"AzurPromiliaJP","params":["-start=azurpromilia_launcher"],"version":"1.0.2","vc":"fixture"}""");
+        File.WriteAllText(Path.Combine(root, "manifest.json"),
+            """{"name":"AZUPRO_JP","version":"1.0.2","basis":"prod/game.zip","vc":"fixture","files":[{"path":"/AzurPromiliaJP.exe","size":"9","hash":"11051210869376104954","vc":"fixture"}]}""");
+        var version = new Version(1, 0, 2);
+        Require(OfficialGameInventory.ReadJapanVersion(root, executable) == version &&
+            OfficialGameInventory.ReadJapan(root, executable, version)
+                .SequenceEqual([GameFile.WithCrc64(9, 0x995DC9BBDF1939FA, executable, executable)]),
+            "Read local Japanese launcher metadata and its CRC64 file inventory together.");
     }
 
     private static async Task TestUnmanagedConflictAsync(string root)

@@ -6,15 +6,16 @@ using Hi3Helper.Plugin.Core.Management.Api;
 using Hi3Helper.Plugin.Core.Utility;
 
 if (args.Length is not (0 or 2))
-    throw new ArgumentException("Pass --china-launcher or --china-game followed by a directory, both launcher directories, or no arguments.");
+    throw new ArgumentException("Pass --china-launcher, --china-game, --china-verify or --china-adopt followed by a directory, both launcher directories, or no arguments.");
 
 bool verifyChinaOnly = args is ["--china-launcher", _];
-bool verifyChinaGame = args is ["--china-game", _];
+bool verifyChinaFiles = args is ["--china-verify", _] or ["--china-adopt", _];
+bool verifyChinaGame = args is ["--china-game", _] || verifyChinaFiles;
 
 IReadOnlyList<AzurPromiliaRegion> regions = AzurPromiliaRegion.All;
-string[] profiles = ["AzurPromiliaCN", "AzurPromiliaJP", "AzurPromiliaTW", "AzurPromiliaKR"];
+string[] profiles = ["AzurPromiliaCN", "AzurPromiliaJP", "AzurPromiliaTW"];
 string[] sites = ["https://azurpromilia.manjuu.com/home/", "https://azurpromilia.jp/",
-    "https://azurpromilia.jimi-global.com/home/", "https://azurpromilia.nexon.com/main"];
+    "https://azurpromilia.jimi-global.com/home/"];
 
 var plugin = new AzurPromiliaPlugin();
 plugin.GetPresetConfigCount(out int count);
@@ -125,6 +126,10 @@ finally
 await LauncherContentTests.RunAsync();
 await LauncherBackgroundTests.RunAsync();
 await ChinaContentTests.RunAsync();
+await ChinaGameReleaseSourceTests.RunAsync();
+await ChinaLauncherBootstrapTests.RunAsync();
+await OverseasGameReleaseTests.RunAsync();
+await GameReleaseRequestTests.RunAsync();
 GameIndexTests.Run();
 await GameIndexTests.RunReleaseAsync();
 await GameFileDownloadTests.RunAsync();
@@ -132,6 +137,9 @@ await GameInstallTests.RunAsync();
 await GameInstallerHostTests.RunAsync();
 await GameLaunchTests.RunAsync();
 Console.WriteLine("PASS: Region presets, publisher websites, and official launcher identity checks.");
+
+if (verifyChinaFiles)
+    await ChinaInstallationAcceptance.RunAsync(args[1], adopt: args[0] == "--china-adopt");
 
 static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps;
 

@@ -22,13 +22,14 @@ if ($library -cnotin $files.Name) { throw "Missing native plugin: $library" }
 Add-Type -Path (Join-Path $PSScriptRoot 'PluginIndexer.cs') -CompilerOptions '/unsafe'
 $plugin = [PluginIndexer]::Read((Join-Path $root $library))
 if ($plugin.Version -ne $ExpectedVersion) { throw "Native plugin version is $($plugin.Version), expected $ExpectedVersion." }
+if ($plugin.Version.Revision -ne 0) { throw 'Plugin releases cannot contain a fourth build number.' }
 if ($plugin.UpdateSources[0] -cne 'https://github.com/maxinglo/Hi3Helper.Plugin.AzurPromilia/releases/download/collapse-update' -or
     $plugin.UpdateSources[1] -cne 'https://plugins.freedorm.net/collapse-plugins/azur-promilia/collapse-update') {
     throw 'The native plugin exports unexpected update sources.'
 }
 
 $manifest = [ordered]@{
-    PluginVersion = $plugin.Version.ToString()
+    PluginVersion = $plugin.Version.ToString(3)
     PluginStandardVersion = $plugin.StandardVersion.ToString()
     PluginCreationDate = $plugin.CreationDate.ToUniversalTime().ToString('O')
     PluginAlternativeIcon = $plugin.Icon

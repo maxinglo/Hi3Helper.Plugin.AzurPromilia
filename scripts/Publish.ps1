@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('\A[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?\z')][string] $Version
+    [ValidatePattern('\A[0-9]+\.[0-9]+\.[0-9]+\z')][string] $Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,6 +10,7 @@ if (-not $Version) {
     $Version = ([xml](Get-Content -LiteralPath $project -Raw)).Project.PropertyGroup.Version
 }
 $parsed = [version]$Version
+if ($parsed.Revision -ge 0) { throw 'Plugin versions must use three numeric components.' }
 $nativeVersion = [version]::new($parsed.Major, $parsed.Minor, $parsed.Build, [Math]::Max(0, $parsed.Revision))
 $packages = Join-Path $root 'artifacts/packages'
 $archive = Join-Path $packages "AzurPromilia_${Version}_Release.zip"

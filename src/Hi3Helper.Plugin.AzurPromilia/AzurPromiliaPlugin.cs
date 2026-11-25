@@ -11,27 +11,37 @@ public sealed partial class AzurPromiliaPlugin : PluginBase
 {
     private static DateTime _creationDate = new(2026, 11, 25, 0, 0, 0, DateTimeKind.Utc);
 
-    private readonly IPluginPresetConfig[] _presets =
-    [
-        new AzurPromiliaPreset(AzurPromiliaRegion.China),
-        new AzurPromiliaPreset(AzurPromiliaRegion.Japan)
-    ];
+    private readonly IPluginPresetConfig[] _presets = AzurPromiliaRegion.All
+        .Select(static region => (IPluginPresetConfig)new AzurPromiliaPreset(region))
+        .ToArray();
 
-    internal static string Localize(string english, string chinese, string japanese) =>
-        SharedStatic.PluginLocaleCode?.Split('-')[0].ToLowerInvariant() switch
+    internal static string Localize(string english, string chinese, string japanese,
+        string? traditionalChinese = null, string? korean = null)
+    {
+        string locale = SharedStatic.PluginLocaleCode?.ToLowerInvariant() ?? string.Empty;
+        string language = locale.Split('-')[0];
+        return language switch
         {
+            "zh" when locale.StartsWith("zh-hant", StringComparison.Ordinal) || locale is "zh-tw" or "zh-hk" or "zh-mo"
+                => traditionalChinese ?? chinese,
             "zh" => chinese,
             "ja" => japanese,
+            "ko" => korean ?? english,
             _ => english
         };
+    }
 
-    public override void GetPluginName(out string result) =>
-        result = Localize("Azur Promilia", "蓝色星原：旅谣", "アズールプロミリア");
+    internal static string GameDisplayName => Localize(
+        "Azur Promilia", "蓝色星原：旅谣", "アズールプロミリア", "藍色星原：旅謠", "아주르 프로밀리아");
+
+    public override void GetPluginName(out string result) => result = GameDisplayName;
 
     public override void GetPluginDescription(out string result) => result = Localize(
-        "Open the official Azur Promilia launchers for China and Japan from Collapse Launcher.",
-        "从 Collapse Launcher 打开《蓝色星原：旅谣》国服或日服官方启动器。",
-        "Collapse Launcher から『アズールプロミリア』の中国版・日本版公式ランチャーを起動します。");
+        "Download, update and launch Azur Promilia for China, Japan and Taiwan, with official news and events.",
+        "在 Collapse Launcher 下载、更新和启动《蓝色星原：旅谣》国服、日服和台服，查看官方资讯与活动。",
+        "Collapse Launcher で『アズールプロミリア』の中国・日本・台湾版をダウンロード、更新、起動し、公式ニュースやイベントを確認できます。",
+        "在 Collapse Launcher 下載、更新和啟動《藍色星原：旅謠》國服、日服和台服，查看官方資訊與活動。",
+        "Collapse Launcher에서 아주르 프로밀리아 중국·일본·대만 클라이언트를 다운로드, 업데이트 및 실행하고 공식 소식과 이벤트를 확인할 수 있습니다.");
 
     public override void GetPluginAuthor(out string result) => result = "Maxing";
 

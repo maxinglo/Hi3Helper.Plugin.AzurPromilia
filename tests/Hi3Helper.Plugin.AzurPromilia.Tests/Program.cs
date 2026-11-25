@@ -1,20 +1,30 @@
+using System.Text.Json;
 using Hi3Helper.Plugin.AzurPromilia;
+using Hi3Helper.Plugin.Core;
+using Hi3Helper.Plugin.Core.Management;
+using Hi3Helper.Plugin.Core.Management.Api;
+using Hi3Helper.Plugin.Core.Utility;
 
 if (args.Length is not (0 or 2))
-    throw new ArgumentException("Pass the directories of the China and Japan launchers, or omit both.");
+    throw new ArgumentException("Pass --china-launcher, --china-game, --china-verify or --china-adopt followed by a directory, both launcher directories, or no arguments.");
 
-AzurPromiliaRegion[] regions = [AzurPromiliaRegion.China, AzurPromiliaRegion.Japan];
-string[] profiles = ["AzurPromiliaCN", "AzurPromiliaJP"];
-string[] sites = ["https://azurpromilia.manjuu.com/home/", "https://azurpromilia.jp/"];
+bool verifyChinaOnly = args is ["--china-launcher", _];
+bool verifyChinaFiles = args is ["--china-verify", _] or ["--china-adopt", _];
+bool verifyChinaGame = args is ["--china-game", _] || verifyChinaFiles;
+
+IReadOnlyList<AzurPromiliaRegion> regions = AzurPromiliaRegion.All;
+string[] profiles = ["AzurPromiliaCN", "AzurPromiliaJP", "AzurPromiliaTW"];
+string[] sites = ["https://azurpromilia.manjuu.com/home/", "https://azurpromilia.jp/",
+    "https://azurpromilia.jimi-global.com/home/"];
 
 var plugin = new AzurPromiliaPlugin();
 plugin.GetPresetConfigCount(out int count);
-Require(count == regions.Length, "The plugin must expose exactly two regions.");
+Require(count == profiles.Length && count == regions.Count, "The plugin must expose every configured region.");
 
 DirectoryInfo temp = Directory.CreateTempSubdirectory("AzurPromiliaTests-");
 try
 {
-    for (int index = 0; index < regions.Length; index++)
+    for (int index = 0; index < regions.Count; index++)
     {
         AzurPromiliaRegion region = regions[index];
         plugin.GetPresetConfig(index, out var preset);
@@ -24,6 +34,8 @@ try
         preset.comGet_ZoneLogoUrl(out string logo);
         Require(profile == profiles[index] && website == sites[index], "Unexpected preset identity.");
         Require(IsHttps(poster) && IsHttps(logo), $"Collapse artwork is missing for {profile}.");
+        Require(!new Uri(logo).AbsolutePath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase),
+            $"Collapse's first-run screen requires a raster logo for {profile}.");
 
         preset.comGet_GameManager(out var manager);
         preset.comGet_GameInstaller(out var installer);
@@ -31,48 +43,124 @@ try
         preset.comGet_LauncherApiNews(out var news);
         Require(manager is not null && installer is not null && media is not null && news is not null,
             $"A required Collapse interface is missing for {profile}.");
+        VerifyPresetMedia(profile, poster, media!);
 
         var locator = new OfficialLauncherLocator(region);
-        string lookalike = Path.Combine(temp.FullName, region.LauncherExecutable);
-        File.WriteAllText(lookalike, "This test fixture is an unsigned lookalike.");
+        if (region.Launcher is { } launcherIdentity)
+        {
+            string lookalike = Path.Combine(temp.FullName, launcherIdentity.Executable);
+            File.WriteAllText(lookalike, "This test fixture is an unsigned lookalike.");
+            Require(!Authenticode.IsSignedBy(lookalike, launcherIdentity.Signer), "A malformed signature was accepted.");
+        }
         Require(locator.FindCandidate(temp.FullName) is null, "An unsigned lookalike was recognized as a launcher.");
         Require(locator.FindCandidate("relative") is null, "A relative launcher directory was accepted.");
-        Require(!Authenticode.IsSignedBy(lookalike, region.LauncherSigner), "A malformed signature was accepted.");
 
-        var fallback = new OfficialLauncherLocator(region with { UninstallKey = null })
+        var fallback = new OfficialLauncherLocator(region with { Launcher = null })
             .CreateStartInfo(temp.FullName);
         Require(fallback.FileName == sites[index] && fallback.Arguments.Length == 0 && fallback.UseShellExecute,
             $"Unexpected website fallback for {profile}.");
 
-        if (args.Length == 2)
+        bool verifyLocal = index < 2 && args.Length == 2 && !verifyChinaGame && (!verifyChinaOnly || index == 0);
+        if (verifyLocal && region.Launcher is { } identity)
         {
-            string officialDirectory = Path.GetFullPath(args[index]);
-            string otherDirectory = Path.GetFullPath(args[1 - index]);
+            string officialDirectory = Path.GetFullPath(verifyChinaOnly ? args[1] : args[index]);
             string officialLauncher = locator.FindCandidate(officialDirectory)
                 ?? throw new InvalidOperationException($"Cannot find a launcher in {officialDirectory}.");
-            Require(locator.FindCandidate(otherDirectory) is null, "A launcher from the other region was accepted.");
-            Require(Authenticode.IsSignedBy(officialLauncher, region.LauncherSigner), $"Signature did not match for {profile}.");
-            Require(!Authenticode.IsSignedBy(officialLauncher, regions[1 - index].LauncherSigner),
-                "The signature accepted the other region's publisher.");
+            if (!verifyChinaOnly)
+            {
+                string otherDirectory = Path.GetFullPath(args[1 - index]);
+                Require(locator.FindCandidate(otherDirectory) is null, "A launcher from the other region was accepted.");
+                Require(!Authenticode.IsSignedBy(officialLauncher, regions[1 - index].Launcher!.Signer),
+                    "The signature accepted the other region's publisher.");
+            }
+            Require(Authenticode.IsSignedBy(officialLauncher, identity.Signer), $"Signature did not match for {profile}.");
             Require(locator.FindExisting(officialDirectory) == officialDirectory, "The signed launcher was not located.");
             var launch = locator.CreateStartInfo(officialDirectory);
             Require(launch.FileName == officialLauncher && launch.WorkingDirectory == Path.GetDirectoryName(officialLauncher)
                 && launch.Arguments.Length == 0 && launch.UseShellExecute, $"Unsafe launch request for {profile}.");
         }
     }
+
+    if (verifyChinaGame)
+    {
+        string directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
+        using JsonDocument publisherVersion = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "_index", "version")));
+        GameVersion expected = new(publisherVersion.RootElement.GetProperty("version").GetString()!);
+        plugin.GetPresetConfig(0, out var china);
+        china.comGet_GameManager(out IGameManager? game);
+        ArgumentNullException.ThrowIfNull(game);
+        china.comGet_GameExecutableName(out string executable);
+        Require(executable == "AzurPromilia.exe", "The China preset must expose the game executable.");
+
+        game.SetGamePath(temp.FullName);
+        game.IsGameInstalled(out bool installed);
+        Require(!installed, "A directory without the publisher's game files must not appear installed.");
+
+        foreach (string path in new[] { directory, Path.GetDirectoryName(directory)! })
+        {
+            game.SetGamePath(path);
+            game.IsGameInstalled(out installed);
+            game.GetGamePath(out string? active);
+            game.GetCurrentGameVersion(out GameVersion version);
+            game.GetApiGameVersion(out GameVersion remote);
+            game.IsGameHasUpdate(out bool update);
+            Guid request = Guid.CreateVersion7();
+            game.FindExistingInstallPathAsync(in request, out nint find);
+            string? found = await find.AsTask<PluginDisposableMemoryMarshal>().WaitAsync(TimeSpan.FromSeconds(15));
+            Require(installed && active == directory && found == directory && version == expected &&
+                remote == GameVersion.Empty && !update, "Collapse must recognize the publisher's existing game and local version.");
+        }
+        Console.WriteLine($"PASS: Recognized signed China game version {expected} at {directory}.");
+    }
 }
 finally
 {
     foreach (AzurPromiliaRegion region in regions)
-        File.Delete(Path.Combine(temp.FullName, region.LauncherExecutable));
+    {
+        if (region.Launcher is { } identity)
+            File.Delete(Path.Combine(temp.FullName, identity.Executable));
+    }
     temp.Delete();
 }
 
-Console.WriteLine(args.Length == 2
-    ? "PASS: Two region presets, official fallback URLs, and both signed launcher binaries."
-    : "PASS: Two region presets, official fallback URLs, and rejection of launcher lookalikes.");
+await LauncherContentTests.RunAsync();
+await LauncherBackgroundTests.RunAsync();
+await ChinaContentTests.RunAsync();
+await ChinaGameReleaseSourceTests.RunAsync();
+await ChinaLauncherBootstrapTests.RunAsync();
+await OverseasGameReleaseTests.RunAsync();
+await GameReleaseRequestTests.RunAsync();
+GameIndexTests.Run();
+await GameIndexTests.RunReleaseAsync();
+await GameFileDownloadTests.RunAsync();
+await GameInstallTests.RunAsync();
+await GameInstallerHostTests.RunAsync();
+await GameLaunchTests.RunAsync();
+Console.WriteLine("PASS: Region presets, publisher websites, and official launcher identity checks.");
+
+if (verifyChinaFiles)
+    await ChinaInstallationAcceptance.RunAsync(args[1], adopt: args[0] == "--china-adopt");
 
 static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+static void VerifyPresetMedia(string profile, string poster, ILauncherApiMedia media)
+{
+    bool isChina = profile == "AzurPromiliaCN";
+    media.GetBackgroundFlag(out LauncherBackgroundFlag flag);
+    Require(flag == ((isChina ? LauncherBackgroundFlag.TypeIsVideo : LauncherBackgroundFlag.TypeIsImage)
+        | LauncherBackgroundFlag.IsSourceFile), $"Unexpected background media type for {profile}.");
+
+    using var backgrounds = PluginDisposableMemoryExtension.ToManagedSpan<LauncherPathEntry>(media.GetBackgroundEntries);
+    Require(backgrounds.Length == (isChina ? 2 : 1), $"Unexpected number of background choices for {profile}.");
+    using LauncherPathEntry still = backgrounds[isChina ? 1 : 0];
+    Require(still.Path == poster, $"The selectable static background must match the preset poster for {profile}.");
+    if (!isChina)
+        return;
+
+    using LauncherPathEntry video = backgrounds[0];
+    Require(video.Path is { } videoUrl && IsHttps(videoUrl) && videoUrl != poster,
+        "Collapse must offer the official China video and its still separately.");
+}
 
 static void Require(bool condition, string message)
 {

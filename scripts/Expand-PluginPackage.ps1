@@ -35,7 +35,12 @@ try {
         $entries.Count -ne @($manifest.Assets).Count + 1) {
         throw 'Unexpected plugin manifest.'
     }
-    if ($ExpectedVersion -and [version]$manifest.PluginVersion -ne $ExpectedVersion) {
+    $manifestVersion = [version]$manifest.PluginVersion
+    $normalizedVersion = [version]::new($manifestVersion.Major, $manifestVersion.Minor, $manifestVersion.Build, [Math]::Max(0, $manifestVersion.Revision))
+    if ($ExpectedVersion) {
+        $ExpectedVersion = [version]::new($ExpectedVersion.Major, $ExpectedVersion.Minor, $ExpectedVersion.Build, [Math]::Max(0, $ExpectedVersion.Revision))
+    }
+    if ($ExpectedVersion -and $normalizedVersion -ne $ExpectedVersion) {
         throw "The installer contains plugin version $($manifest.PluginVersion), expected $ExpectedVersion."
     }
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)

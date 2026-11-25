@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using Hi3Helper.Plugin.AzurPromilia;
 using Hi3Helper.Plugin.AzurPromilia.Content;
 using Hi3Helper.Plugin.Core;
@@ -24,7 +25,9 @@ internal static class LauncherContentTests
             [
                 new("Community", Site + "community", Site + "icon.png", Site + "hover.png"),
                 new("QR channel", "", Site + "qr-icon.png", QrImageUrl: Site + "qr.png"),
-                new("Invalid icon", Site + "invalid", "http://example.invalid/icon.png")
+                new("Invalid icon", Site + "invalid", "http://example.invalid/icon.png"),
+                new("Discord", Site + "discord", "", IconData: OfficialSocialIcons.Discord),
+                new("お問い合わせ", Site + "support", "", IconData: OfficialSocialIcons.JapanSupport)
             ]);
         int requests = 0;
         var api = new OfficialLauncherNews("Fixture", (_, _) => ++requests switch
@@ -53,7 +56,7 @@ internal static class LauncherContentTests
                 && staticBanner.ClickUrl == Site + "illustration.png", "Carousel click targets were marshalled incorrectly.");
 
             using var social = PluginDisposableMemoryExtension.ToManagedSpan<LauncherSocialMediaEntry>(api.GetSocialMediaEntries);
-            Require(social.Length == 2, "Social entries with unsafe assets must be removed.");
+            Require(social.Length == 4, "Social entries with unsafe assets must be removed while bundled artwork survives.");
             using LauncherSocialMediaEntry community = social[0];
             using LauncherSocialMediaEntry qr = social[1];
             Require(community.ClickUrl == Site + "community" && community.IconHoverPath == Site + "hover.png"
@@ -62,6 +65,16 @@ internal static class LauncherContentTests
             Require(qr.ClickUrl is null && qr.QrPath == Site + "qr.png"
                 && qr.Flags == (LauncherSocialMediaEntryFlag.IconIsPath | LauncherSocialMediaEntryFlag.QrImageIsPath),
                 "QR-only entry was not marshalled.");
+
+            for (int index = 2; index < social.Length; index++)
+            {
+                using LauncherSocialMediaEntry bundled = social[index];
+                byte[] original = index == 2 ? OfficialSocialIcons.Discord : OfficialSocialIcons.JapanSupport;
+                Require(bundled.Flags == LauncherSocialMediaEntryFlag.IconIsDataBuffer &&
+                    bundled.IconPath is { } encoded && Base64Url.DecodeFromChars(encoded).AsSpan().SequenceEqual(original) &&
+                    original.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }),
+                    "Bundled social artwork must pass through the Collapse ABI as the complete PNG buffer.");
+            }
 
             await InitAsync(api);
             using var retainedNews = PluginDisposableMemoryExtension.ToManagedSpan<LauncherNewsEntry>(api.GetNewsEntries);

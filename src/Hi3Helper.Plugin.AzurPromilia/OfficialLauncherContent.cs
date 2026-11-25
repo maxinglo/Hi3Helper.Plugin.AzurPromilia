@@ -139,7 +139,8 @@ internal sealed partial class OfficialLauncherNews(
                     ? snapshot.Carousel.Where(item => IsHttps(item.ImageUrl) && (string.IsNullOrWhiteSpace(item.Url) || IsHttps(item.Url)))
                         .DistinctBy(item => item.ImageUrl).ToArray()
                     : previous.Carousel;
-                LauncherSocialItem[] social = snapshot.Social.Where(item => !string.IsNullOrWhiteSpace(item.Name) && IsHttps(item.IconUrl)
+                LauncherSocialItem[] social = snapshot.Social.Where(item => !string.IsNullOrWhiteSpace(item.Name) &&
+                    (item.IconData is { Length: > 0 } || IsHttps(item.IconUrl))
                     && (IsHttps(item.Url) || IsHttps(item.QrImageUrl))).ToArray();
                 Volatile.Write(ref _snapshot, new LauncherContentSnapshot(news, carousel, social));
             }
@@ -198,8 +199,17 @@ internal sealed partial class OfficialLauncherNews(
             ref LauncherSocialMediaEntry entry = ref entries[index];
             entry.WriteDescription(item.Name);
             entry.WriteClickUrl(IsHttps(item.Url) ? item.Url : null);
-            entry.WriteIcon(item.IconUrl);
-            var flags = LauncherSocialMediaEntryFlag.IconIsPath;
+            LauncherSocialMediaEntryFlag flags;
+            if (item.IconData is { Length: > 0 } icon)
+            {
+                entry.WriteIcon(icon);
+                flags = LauncherSocialMediaEntryFlag.IconIsDataBuffer;
+            }
+            else
+            {
+                entry.WriteIcon(item.IconUrl);
+                flags = LauncherSocialMediaEntryFlag.IconIsPath;
+            }
             if (IsHttps(item.HoverIconUrl))
             {
                 entry.WriteIconHover(item.HoverIconUrl);

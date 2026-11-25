@@ -22,6 +22,8 @@
   <ItemGroup>
     <ProjectReference Include="../../Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj" />
     <InternalsVisibleTo Include="Hi3Helper.Plugin.AzurPromilia.Tests" />
+    <EmbeddedResource Include="Assets/discord.png" LogicalName="AzurPromilia.Social.discord.png" />
+    <EmbeddedResource Include="Assets/japan-support.png" LogicalName="AzurPromilia.Social.japan-support.png" />
   </ItemGroup>
   <Target Name="GeneratePluginVersion" BeforeTargets="CoreCompile" DependsOnTargets="GetAssemblyVersion">
     <WriteLinesToFile File="$(IntermediateOutputPath)PluginVersion.g.cs"

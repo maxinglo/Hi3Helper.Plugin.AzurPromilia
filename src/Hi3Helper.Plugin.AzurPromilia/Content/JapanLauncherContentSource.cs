@@ -19,7 +19,9 @@ internal static class JapanLauncherContentSource
         return new LauncherContentSnapshot(newsItems, carouselItems,
         [
             new("X", "https://x.com/AzurPromilia_JP?lang=ja", AssetRoot + "sns/x.png"),
-            new("YouTube", "https://www.youtube.com/@AzurPromilia_JP", "https://www.youtube.com/favicon.ico")
+            new("YouTube", "https://www.youtube.com/@AzurPromilia_JP", "https://www.youtube.com/favicon.ico"),
+            // Keep the Japanese launcher's customer support entry beside X and YouTube.
+            new("お問い合わせ", "https://www.azurpromilia.jp/contact", "", IconData: OfficialSocialIcons.JapanSupport)
         ], newsLoaded, carouselLoaded);
     }
 

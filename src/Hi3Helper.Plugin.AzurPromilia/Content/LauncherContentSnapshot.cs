@@ -15,4 +15,5 @@ internal sealed record LauncherNewsItem(
 internal sealed record LauncherCarouselItem(string ImageUrl, string Url, string Description);
 
 internal sealed record LauncherSocialItem(
-    string Name, string Url, string IconUrl, string? HoverIconUrl = null, string? QrImageUrl = null);
+    string Name, string Url, string IconUrl, string? HoverIconUrl = null, string? QrImageUrl = null,
+    byte[]? IconData = null);

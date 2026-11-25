@@ -9,8 +9,15 @@ using Microsoft.Extensions.Logging;
 namespace Hi3Helper.Plugin.AzurPromilia;
 
 [GeneratedComClass]
-internal sealed partial class OfficialLauncherMedia(string backgroundUrl) : LauncherApiMediaBase
+internal sealed partial class OfficialLauncherMedia(string backgroundUrl, string? backgroundVideoUrl) : LauncherApiMediaBase
 {
+    private readonly string[] _backgroundPaths = backgroundVideoUrl is not null
+        ? [backgroundVideoUrl, backgroundUrl]
+        : backgroundUrl.Length == 0 ? [] : [backgroundUrl];
+    private readonly LauncherBackgroundFlag _backgroundType = backgroundVideoUrl is null
+        ? LauncherBackgroundFlag.TypeIsImage
+        : LauncherBackgroundFlag.TypeIsVideo;
+
     protected override HttpClient ApiResponseHttpClient { get; set; } = new();
 
     protected override Task<int> InitAsync(CancellationToken token)
@@ -19,23 +26,24 @@ internal sealed partial class OfficialLauncherMedia(string backgroundUrl) : Laun
         return Task.FromResult(0);
     }
 
-    public override void GetBackgroundFlag(out LauncherBackgroundFlag result) => result = backgroundUrl.Length == 0
+    public override void GetBackgroundFlag(out LauncherBackgroundFlag result) => result = _backgroundPaths.Length == 0
         ? LauncherBackgroundFlag.None
-        : LauncherBackgroundFlag.TypeIsImage | LauncherBackgroundFlag.IsSourceFile;
+        : _backgroundType | LauncherBackgroundFlag.IsSourceFile;
 
     public override void GetLogoFlag(out LauncherBackgroundFlag result) => result = LauncherBackgroundFlag.None;
 
     public override void GetBackgroundEntries(out nint handle, out int count, out bool isDisposable, out bool isAllocated)
     {
-        if (backgroundUrl.Length == 0)
+        if (_backgroundPaths.Length == 0)
         {
             (handle, count, isDisposable, isAllocated) = (0, 0, false, false);
             return;
         }
 
-        PluginDisposableMemory<LauncherPathEntry> entries = PluginDisposableMemory<LauncherPathEntry>.Alloc();
-        entries[0].Write(backgroundUrl, Span<byte>.Empty);
-        (handle, count, isDisposable, isAllocated) = (entries.AsSafePointer(), 1, entries.IsDisposable == 1, true);
+        PluginDisposableMemory<LauncherPathEntry> entries = PluginDisposableMemory<LauncherPathEntry>.Alloc(_backgroundPaths.Length);
+        for (int index = 0; index < _backgroundPaths.Length; index++)
+            entries[index].Write(_backgroundPaths[index], Span<byte>.Empty);
+        (handle, count, isDisposable, isAllocated) = (entries.AsSafePointer(), entries.Length, entries.IsDisposable == 1, true);
     }
 
     public override void GetLogoOverlayEntries(out nint handle, out int count, out bool isDisposable, out bool isAllocated) =>

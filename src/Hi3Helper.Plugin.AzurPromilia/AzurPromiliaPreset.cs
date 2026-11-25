@@ -16,7 +16,8 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
         var manager = new OfficialLauncherManager(region);
         GameManager = manager;
         GameInstaller = new OfficialLauncherInstaller(manager);
-        LauncherApiMedia = new OfficialLauncherMedia(region.BackgroundUrl);
+        // Use the China launcher's video and still as separate background choices.
+        LauncherApiMedia = new OfficialLauncherMedia(region.BackgroundUrl, region.BackgroundVideoUrl);
         LauncherApiNews = new OfficialLauncherNews(region.ProfileName, region.LoadContent);
     }
 

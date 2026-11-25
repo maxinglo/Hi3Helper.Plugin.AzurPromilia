@@ -26,18 +26,20 @@ internal sealed record AzurPromiliaRegion(
     string? KoreanName = null,
     string? NativeGameExecutable = null,
     string? ManjuuGameDirectoryName = null,
-    Func<HttpClient, CancellationToken, Task<GameInstallPlan>>? LoadGameInstallPlan = null)
+    Func<HttpClient, CancellationToken, Task<GameInstallPlan>>? LoadGameInstallPlan = null,
+    string? BackgroundVideoUrl = null)
 {
     internal static AzurPromiliaRegion China { get; } = new(
         "AzurPromiliaCN", "China", "国服", "中国版", "zh-CN", "Manjuu",
         "https://azurpromilia.manjuu.com/home/",
-        "https://webstatic.manjuu.com/web/static/azurpromilia.manjuu.com/assets/kv_poster-DmJ_mC8Q.jpg",
+        "https://l1-all-plat-server.manjuu.com/azurpromilia/img/93cdd43e096046138053253dc56d3562/1795598820281_WBTIUZFKFK（无字）OB启动器静态图延展雪地大奇波kv.png",
         "https://webstatic.manjuu.com/web/static/azurpromilia.manjuu.com/assets/logo-white-D9HvtDCJ.png",
         ChinaLauncherContentSource.LoadAsync,
         new OfficialLauncherIdentity("launcher.exe", "蓝色星原：旅谣", "上海蛮奈网络科技有限公司",
             UninstallKey: "AzurPromilia_35_C000", VersionedDirectory: true),
         TraditionalChineseName: "陸服", KoreanName: "중국",
-        NativeGameExecutable: "AzurPromilia.exe", ManjuuGameDirectoryName: "AzurPromilia_Game");
+        NativeGameExecutable: "AzurPromilia.exe", ManjuuGameDirectoryName: "AzurPromilia_Game",
+        BackgroundVideoUrl: "https://l1-all-plat-server.manjuu.com/azurpromilia/video/93cdd43e096046138053253dc56d3562/1795598820421_ECAYRBMANXOB启动器动态图片适配与延展.mp4");
 
     internal static AzurPromiliaRegion Japan { get; } = new(
         "AzurPromiliaJP", "Japan", "日服", "日本版", "ja-JP", "Yostar",

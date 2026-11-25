@@ -2,6 +2,7 @@ using System.Text.Json;
 using Hi3Helper.Plugin.AzurPromilia;
 using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
+using Hi3Helper.Plugin.Core.Management.Api;
 using Hi3Helper.Plugin.Core.Utility;
 
 if (args.Length is not (0 or 2))
@@ -41,6 +42,7 @@ try
         preset.comGet_LauncherApiNews(out var news);
         Require(manager is not null && installer is not null && media is not null && news is not null,
             $"A required Collapse interface is missing for {profile}.");
+        VerifyPresetMedia(profile, poster, media!);
 
         var locator = new OfficialLauncherLocator(region);
         if (region.Launcher is { } launcherIdentity)
@@ -130,6 +132,26 @@ await GameInstallerHostTests.RunAsync();
 Console.WriteLine("PASS: Region presets, publisher websites, and official launcher identity checks.");
 
 static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+static void VerifyPresetMedia(string profile, string poster, ILauncherApiMedia media)
+{
+    bool isChina = profile == "AzurPromiliaCN";
+    media.GetBackgroundFlag(out LauncherBackgroundFlag flag);
+    Require(flag == ((isChina ? LauncherBackgroundFlag.TypeIsVideo : LauncherBackgroundFlag.TypeIsImage)
+        | LauncherBackgroundFlag.IsSourceFile), $"Unexpected background media type for {profile}.");
+
+    using var backgrounds = PluginDisposableMemoryExtension.ToManagedSpan<LauncherPathEntry>(media.GetBackgroundEntries);
+    Require(backgrounds.Length == (isChina ? 2 : 1), $"Unexpected number of background choices for {profile}.");
+    using LauncherPathEntry still = backgrounds[isChina ? 1 : 0];
+    Require(still.Path == poster, $"The selectable static background must match the preset poster for {profile}.");
+    if (!isChina)
+        return;
+
+    using LauncherPathEntry video = backgrounds[0];
+    Require(poster == "https://l1-all-plat-server.manjuu.com/azurpromilia/img/93cdd43e096046138053253dc56d3562/1795598820281_WBTIUZFKFK（无字）OB启动器静态图延展雪地大奇波kv.png"
+        && video.Path == "https://l1-all-plat-server.manjuu.com/azurpromilia/video/93cdd43e096046138053253dc56d3562/1795598820421_ECAYRBMANXOB启动器动态图片适配与延展.mp4",
+        "Collapse must offer the official China launcher's video first and its unbranded still separately.");
+}
 
 static void Require(bool condition, string message)
 {

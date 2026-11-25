@@ -100,6 +100,8 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
 
     internal void OpenOfficialLauncher() => Process.Start(_locator.CreateStartInfo(GetLauncherSearchPath()))?.Dispose();
 
+    internal string? FindLocalOfficialLauncherDirectory() => _locator.FindExisting(GetLauncherSearchPath(), requireLocalFile: true);
+
     internal string? GetInstalledExecutablePath() =>
         CurrentGameVersion != GameVersion.Empty && region.NativeGameExecutable is { } executable &&
         CurrentGameInstallPath is { } directory && Path.IsPathFullyQualified(directory)

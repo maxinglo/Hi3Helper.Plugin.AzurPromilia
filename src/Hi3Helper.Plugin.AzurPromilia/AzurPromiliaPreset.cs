@@ -9,6 +9,7 @@ namespace Hi3Helper.Plugin.AzurPromilia;
 internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
 {
     private readonly AzurPromiliaRegion _region;
+    private readonly OfficialLauncherMedia _media;
 
     internal AzurPromiliaPreset(AzurPromiliaRegion region)
     {
@@ -16,8 +17,10 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
         var manager = new OfficialLauncherManager(region);
         GameManager = manager;
         GameInstaller = new OfficialLauncherInstaller(manager);
-        // Use the China launcher's video and still as separate background choices.
-        LauncherApiMedia = new OfficialLauncherMedia(region.BackgroundUrl, region.BackgroundVideoUrl);
+        // Refresh the China launcher's public background on initialization and offer its video and still separately.
+        _media = new OfficialLauncherMedia(region.BackgroundUrl, region.BackgroundVideoUrl,
+            region.ProfileName == AzurPromiliaRegion.China.ProfileName ? manager.FindLocalOfficialLauncherDirectory : null);
+        LauncherApiMedia = _media;
         LauncherApiNews = new OfficialLauncherNews(region.ProfileName, region.LoadContent);
     }
 
@@ -35,7 +38,7 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
         $"{ZoneName} official site and community", $"{ZoneName}官方网站及社区", $"{ZoneName}公式サイト・コミュニティ",
         $"{ZoneName}官方網站及社群", $"{ZoneName} 공식 웹사이트 및 커뮤니티");
     public override string ZoneLogoUrl => _region.LogoUrl;
-    public override string ZonePosterUrl => _region.BackgroundUrl;
+    public override string ZonePosterUrl => _media.PosterUrl;
     public override string ZoneHomePageUrl => _region.Website;
     public override GameReleaseChannel ReleaseChannel => GameReleaseChannel.Public;
     public override string GameMainLanguage => _region.Language;

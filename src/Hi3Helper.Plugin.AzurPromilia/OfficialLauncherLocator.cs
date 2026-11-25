@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security;
+using Hi3Helper.Plugin.AzurPromilia.Content;
 using Microsoft.Win32;
 
 namespace Hi3Helper.Plugin.AzurPromilia;
@@ -10,8 +11,8 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
 
     internal string? FindCandidate(string? directory) => GetCandidatePaths(directory).FirstOrDefault(MatchesProduct);
 
-    internal string? FindExisting(string? configuredDirectory) =>
-        FindLauncher(configuredDirectory) is { } launcher ? GetInstallDirectory(Path.GetDirectoryName(launcher)) : null;
+    internal string? FindExisting(string? configuredDirectory, bool requireLocalFile = false) =>
+        FindLauncher(configuredDirectory, requireLocalFile) is { } launcher ? GetInstallDirectory(Path.GetDirectoryName(launcher)) : null;
 
     internal string? GetInstallDirectory(string? directory)
     {
@@ -36,7 +37,7 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
         };
     }
 
-    private string? FindLauncher(string? configuredDirectory)
+    private string? FindLauncher(string? configuredDirectory, bool requireLocalFile = false)
     {
         if (region.Launcher is not { } launcher)
             return null;
@@ -44,7 +45,8 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
         return GetInstalledDirectories().Prepend(configuredDirectory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .SelectMany(GetCandidatePaths)
-            .FirstOrDefault(path => MatchesProduct(path) && Authenticode.IsSignedBy(path, launcher.Signer));
+            .FirstOrDefault(path => (!requireLocalFile || LauncherBackgroundCache.IsLocalFile(path)) &&
+                                    MatchesProduct(path) && Authenticode.IsSignedBy(path, launcher.Signer));
     }
 
     private IEnumerable<string> GetCandidatePaths(string? directory)

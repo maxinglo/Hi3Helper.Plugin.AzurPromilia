@@ -123,6 +123,7 @@ finally
 }
 
 await LauncherContentTests.RunAsync();
+await LauncherBackgroundTests.RunAsync();
 await ChinaContentTests.RunAsync();
 GameIndexTests.Run();
 await GameIndexTests.RunReleaseAsync();
@@ -148,9 +149,8 @@ static void VerifyPresetMedia(string profile, string poster, ILauncherApiMedia m
         return;
 
     using LauncherPathEntry video = backgrounds[0];
-    Require(poster == "https://l1-all-plat-server.manjuu.com/azurpromilia/img/93cdd43e096046138053253dc56d3562/1795598820281_WBTIUZFKFK（无字）OB启动器静态图延展雪地大奇波kv.png"
-        && video.Path == "https://l1-all-plat-server.manjuu.com/azurpromilia/video/93cdd43e096046138053253dc56d3562/1795598820421_ECAYRBMANXOB启动器动态图片适配与延展.mp4",
-        "Collapse must offer the official China launcher's video first and its unbranded still separately.");
+    Require(video.Path is { } videoUrl && IsHttps(videoUrl) && videoUrl != poster,
+        "Collapse must offer the official China video and its still separately.");
 }
 
 static void Require(bool condition, string message)

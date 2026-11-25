@@ -9,40 +9,68 @@ using Microsoft.Extensions.Logging;
 namespace Hi3Helper.Plugin.AzurPromilia;
 
 [GeneratedComClass]
-internal sealed partial class OfficialLauncherMedia(string backgroundUrl, string? backgroundVideoUrl) : LauncherApiMediaBase
+internal sealed partial class OfficialLauncherMedia(string backgroundUrl, string? backgroundVideoUrl,
+    Func<string?>? findVerifiedLauncherDirectory = null) : LauncherApiMediaBase
 {
-    private readonly string[] _backgroundPaths = backgroundVideoUrl is not null
-        ? [backgroundVideoUrl, backgroundUrl]
-        : backgroundUrl.Length == 0 ? [] : [backgroundUrl];
-    private readonly LauncherBackgroundFlag _backgroundType = backgroundVideoUrl is null
-        ? LauncherBackgroundFlag.TypeIsImage
-        : LauncherBackgroundFlag.TypeIsVideo;
+    private readonly LauncherBackground _fallback = new(backgroundUrl, backgroundVideoUrl);
+    private LauncherBackground? _background;
+
+    internal string PosterUrl => Background.StillUrl;
+
+    private LauncherBackground Background
+    {
+        get
+        {
+            using (ThisInstanceLock.EnterScope())
+                return _background ??= ReadBackground();
+        }
+    }
 
     protected override HttpClient ApiResponseHttpClient { get; set; } = new();
 
     protected override Task<int> InitAsync(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        return Task.FromResult(0);
+        return findVerifiedLauncherDirectory is null ? Task.FromResult(0) : Task.Run(() =>
+        {
+            using (ThisInstanceLock.EnterScope())
+            {
+                LauncherBackground background = ReadBackground();
+                token.ThrowIfCancellationRequested();
+                _background = background;
+            }
+            return 0;
+        }, token);
     }
 
-    public override void GetBackgroundFlag(out LauncherBackgroundFlag result) => result = _backgroundPaths.Length == 0
-        ? LauncherBackgroundFlag.None
-        : _backgroundType | LauncherBackgroundFlag.IsSourceFile;
+    private LauncherBackground ReadBackground() => findVerifiedLauncherDirectory is null
+        ? _fallback
+        : LauncherBackgroundCache.Read(findVerifiedLauncherDirectory) ?? _fallback;
+
+    public override void GetBackgroundFlag(out LauncherBackgroundFlag result)
+    {
+        LauncherBackground background = Background;
+        result = background.VideoUrl is not null ? LauncherBackgroundFlag.TypeIsVideo | LauncherBackgroundFlag.IsSourceFile
+            : background.StillUrl.Length != 0 ? LauncherBackgroundFlag.TypeIsImage | LauncherBackgroundFlag.IsSourceFile
+            : LauncherBackgroundFlag.None;
+    }
 
     public override void GetLogoFlag(out LauncherBackgroundFlag result) => result = LauncherBackgroundFlag.None;
 
     public override void GetBackgroundEntries(out nint handle, out int count, out bool isDisposable, out bool isAllocated)
     {
-        if (_backgroundPaths.Length == 0)
+        LauncherBackground background = Background;
+        string[] paths = background.VideoUrl is { } video ? [video, background.StillUrl]
+            : background.StillUrl.Length != 0 ? [background.StillUrl] : [];
+        if (paths.Length == 0)
         {
             (handle, count, isDisposable, isAllocated) = (0, 0, false, false);
             return;
         }
 
-        PluginDisposableMemory<LauncherPathEntry> entries = PluginDisposableMemory<LauncherPathEntry>.Alloc(_backgroundPaths.Length);
-        for (int index = 0; index < _backgroundPaths.Length; index++)
-            entries[index].Write(_backgroundPaths[index], Span<byte>.Empty);
+        PluginDisposableMemory<LauncherPathEntry> entries = PluginDisposableMemory<LauncherPathEntry>.Alloc(paths.Length);
+        for (int index = 0; index < paths.Length; index++)
+            entries[index].Write(paths[index], Span<byte>.Empty);
         (handle, count, isDisposable, isAllocated) = (entries.AsSafePointer(), entries.Length, entries.IsDisposable == 1, true);
     }
 

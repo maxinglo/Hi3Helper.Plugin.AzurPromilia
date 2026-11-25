@@ -7,7 +7,6 @@ namespace Hi3Helper.Plugin.AzurPromilia.Content;
 internal static class JapanLauncherContentSource
 {
     private const string Api = "https://azurpromilia.jp/official/api/webcms/official?key=";
-    private const string AssetRoot = "https://webusstatic.yo-star.com/azurpromilia-jp/azurpromilia-jp-official-2026/prod/azurpromiliajpofficial2026/";
 
     internal static async Task<LauncherContentSnapshot> LoadAsync(HttpClient http, CancellationToken token)
     {
@@ -18,8 +17,8 @@ internal static class JapanLauncherContentSource
         var (carouselItems, carouselLoaded) = await carousel.ConfigureAwait(false);
         return new LauncherContentSnapshot(newsItems, carouselItems,
         [
-            new("X", "https://x.com/AzurPromilia_JP?lang=ja", AssetRoot + "sns/x.png"),
-            new("YouTube", "https://www.youtube.com/@AzurPromilia_JP", "https://www.youtube.com/favicon.ico"),
+            new("X", "https://x.com/AzurPromilia_JP?lang=ja", "", IconData: OfficialSocialIcons.X),
+            new("YouTube", "https://www.youtube.com/@AzurPromilia_JP", "", IconData: OfficialSocialIcons.YouTube),
             // Keep the Japanese launcher's customer support entry beside X and YouTube.
             new("お問い合わせ", "https://www.azurpromilia.jp/contact", "", IconData: OfficialSocialIcons.JapanSupport)
         ], newsLoaded, carouselLoaded);

@@ -1,7 +1,12 @@
 namespace Hi3Helper.Plugin.AzurPromilia.Content;
 
+// Keep Japan and Taiwan social icons white, transparent and visually consistent in size.
 internal static class OfficialSocialIcons
 {
+    internal static byte[] X { get; } = Read("x.png");
+    internal static byte[] YouTube { get; } = Read("youtube.png");
+    internal static byte[] Facebook { get; } = Read("facebook.png");
+    internal static byte[] Instagram { get; } = Read("instagram.png");
     internal static byte[] Discord { get; } = Read("discord.png");
     internal static byte[] JapanSupport { get; } = Read("japan-support.png");
 

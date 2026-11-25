@@ -4,10 +4,10 @@ internal static class TaiwanLauncherContentSource
 {
     private static readonly LauncherSocialItem[] Social =
     [
-        new("Facebook", "https://www.facebook.com/AzurPromiliaTC", "https://www.facebook.com/favicon.ico"),
-        new("Instagram", "https://www.instagram.com/azurpromilia.official", "https://www.instagram.com/favicon.ico"),
-        new("YouTube", "https://www.youtube.com/@AzurPromiliaTC", "https://www.youtube.com/favicon.ico"),
-        // Bundle the Taiwan website's Discord artwork so the social button does not depend on a favicon request.
+        new("Facebook", "https://www.facebook.com/AzurPromiliaTC", "", IconData: OfficialSocialIcons.Facebook),
+        new("Instagram", "https://www.instagram.com/azurpromilia.official", "", IconData: OfficialSocialIcons.Instagram),
+        new("YouTube", "https://www.youtube.com/@AzurPromiliaTC", "", IconData: OfficialSocialIcons.YouTube),
+        // Keep Taiwan Discord available without a network icon request.
         new("Discord", "https://discord.gg/U34m2k2RkC", "", IconData: OfficialSocialIcons.Discord)
     ];
 

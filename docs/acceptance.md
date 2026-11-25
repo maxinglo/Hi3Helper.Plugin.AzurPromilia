@@ -48,6 +48,8 @@
 
 官方动态背景、静态背景选项、官网活动与公告列表及 `BETA` 标签已通过界面验收。README 使用的[截图](assets/collapse-cn.png)保留验收时的原图。
 
+日服的 X、YouTube、客服与台港澳的 Facebook、Instagram、YouTube、Discord 统一为白色透明图标，采用 80×80 画布和相同居中区域。全部图标随原生 DLL 携带，避免 favicon 的网络可用性和风格差异。原生接口检查核对完整 PNG 数据、预设和目标地址；日服客服使用官方启动器返回的 `https://www.azurpromilia.jp/contact`。
+
 ## 更新与恢复回归
 
 常规测试和 Native AOT 包检查覆盖：

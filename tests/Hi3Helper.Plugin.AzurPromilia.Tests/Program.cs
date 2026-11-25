@@ -83,6 +83,8 @@ finally
 
 await LauncherContentTests.RunAsync();
 await ChinaContentTests.RunAsync();
+GameIndexTests.Run();
+await GameFileDownloadTests.RunAsync();
 Console.WriteLine("PASS: Region presets, publisher websites, and official launcher identity checks.");
 
 static bool IsHttps(string url) => Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps;

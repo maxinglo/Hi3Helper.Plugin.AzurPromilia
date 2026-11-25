@@ -1,4 +1,6 @@
 using System.Security;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Hi3Helper.Plugin.AzurPromilia.Content;
@@ -9,6 +11,48 @@ internal static class LauncherBackgroundCache
 {
     private const string CdnOrigin = "https://l1-all-plat-server.manjuu.com/";
     private const int MaxCacheSize = 16 * 1024;
+
+    internal static async Task<string> GetOrDownloadAsync(HttpClient http, string directory, string url,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var uri = new Uri(url);
+        string key = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(uri.AbsoluteUri)));
+        string extension = Path.GetExtension(uri.AbsolutePath).ToLowerInvariant();
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, key + extension);
+        if (IsCached(path))
+            return path;
+
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using HttpResponseMessage response = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token)
+                .ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                             64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await response.Content.CopyToAsync(output, token).ConfigureAwait(false);
+                if (output.Length == 0 || (response.Content.Headers.ContentLength is { } size && size != output.Length))
+                    throw new InvalidDataException("The publisher's background download is incomplete.");
+            }
+
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                File.Move(temporary, path, overwrite: true);
+            }
+            catch (IOException) when (IsCached(path)) { }
+            return path;
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+    }
+
+    private static bool IsCached(string path) => new FileInfo(path) is { Exists: true, Length: > 0 };
 
     internal static LauncherBackground? Read(Func<string?> findVerifiedLauncherDirectory)
     {

@@ -10,7 +10,7 @@
     <NativeLib>Shared</NativeLib>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>AzurPromilia</AssemblyName>
-    <Version>0.2.0.9</Version>
+    <Version>0.2.0.10</Version>
     <Authors>Maxing</Authors>
     <Description>Azur Promilia support for Collapse Launcher, including direct launch of the installed mainland China game.</Description>
     <DebugType>embedded</DebugType>

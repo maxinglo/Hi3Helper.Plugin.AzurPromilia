@@ -10,10 +10,11 @@ namespace Hi3Helper.Plugin.AzurPromilia;
 
 [GeneratedComClass]
 internal sealed partial class OfficialLauncherMedia(string backgroundUrl, string? backgroundVideoUrl,
-    Func<string?>? findVerifiedLauncherDirectory = null) : LauncherApiMediaBase
+    Func<string?>? findVerifiedLauncherDirectory = null, HttpClient? http = null, string? cacheDirectory = null) : LauncherApiMediaBase
 {
     private readonly LauncherBackground _fallback = new(backgroundUrl, backgroundVideoUrl);
     private LauncherBackground? _background;
+    private LauncherBackground? _preparedBackground;
 
     internal string PosterUrl => Background.StillUrl;
 
@@ -26,21 +27,48 @@ internal sealed partial class OfficialLauncherMedia(string backgroundUrl, string
         }
     }
 
-    protected override HttpClient ApiResponseHttpClient { get; set; } = new();
+    protected override HttpClient ApiResponseHttpClient { get; set; } = http ?? new HttpClient(new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    });
 
-    protected override Task<int> InitAsync(CancellationToken token)
+    // Keep the China backgrounds visible by caching both assets under filenames Collapse can round-trip through a file URI.
+    protected override async Task<int> InitAsync(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        return findVerifiedLauncherDirectory is null ? Task.FromResult(0) : Task.Run(() =>
-        {
-            using (ThisInstanceLock.EnterScope())
-            {
-                LauncherBackground background = ReadBackground();
-                token.ThrowIfCancellationRequested();
-                _background = background;
-            }
+        if (findVerifiedLauncherDirectory is null)
             return 0;
-        }, token);
+
+        LauncherBackground background = ReadBackground();
+        string directory = cacheDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CollapseLauncher", "Plugins", "AzurPromilia", "Media");
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(token);
+        request.CancelAfter(TimeSpan.FromSeconds(30));
+        Task<string> still = PrepareAssetAsync(directory, background.StillUrl, request.Token);
+        Task<string>? video = background.VideoUrl is { } videoUrl ? PrepareAssetAsync(directory, videoUrl, request.Token) : null;
+        var prepared = new LauncherBackground(await still.ConfigureAwait(false), video is null ? null : await video.ConfigureAwait(false));
+
+        using (ThisInstanceLock.EnterScope())
+        {
+            token.ThrowIfCancellationRequested();
+            _background = background;
+            _preparedBackground = prepared;
+        }
+        return 0;
+    }
+
+    private async Task<string> PrepareAssetAsync(string directory, string url, CancellationToken token)
+    {
+        try
+        {
+            return await LauncherBackgroundCache.GetOrDownloadAsync(ApiResponseHttpClient, directory, url, token).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or
+                                      UnauthorizedAccessException or OperationCanceledException)
+        {
+            SharedStatic.InstanceLogger.LogWarning(error, "Could not cache official launcher background {Url}.", url);
+            return url;
+        }
     }
 
     private LauncherBackground ReadBackground() => findVerifiedLauncherDirectory is null
@@ -59,8 +87,12 @@ internal sealed partial class OfficialLauncherMedia(string backgroundUrl, string
 
     public override void GetBackgroundEntries(out nint handle, out int count, out bool isDisposable, out bool isAllocated)
     {
-        LauncherBackground background = Background;
-        string[] paths = background.VideoUrl is { } video ? [video, background.StillUrl]
+        LauncherBackground background;
+        using (ThisInstanceLock.EnterScope())
+            background = _preparedBackground ?? (_background ??= ReadBackground());
+        string[] paths = background.VideoUrl is { } video
+            ? Path.IsPathFullyQualified(background.StillUrl) && !Path.IsPathFullyQualified(video)
+                ? [background.StillUrl, video] : [video, background.StillUrl]
             : background.StillUrl.Length != 0 ? [background.StillUrl] : [];
         if (paths.Length == 0)
         {

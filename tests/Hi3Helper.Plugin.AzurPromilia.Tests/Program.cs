@@ -1,9 +1,14 @@
+using System.Text.Json;
 using Hi3Helper.Plugin.AzurPromilia;
+using Hi3Helper.Plugin.Core;
+using Hi3Helper.Plugin.Core.Management;
+using Hi3Helper.Plugin.Core.Utility;
 
 if (args.Length is not (0 or 2))
-    throw new ArgumentException("Pass --china-launcher followed by a directory, both launcher directories, or no arguments.");
+    throw new ArgumentException("Pass --china-launcher or --china-game followed by a directory, both launcher directories, or no arguments.");
 
 bool verifyChinaOnly = args is ["--china-launcher", _];
+bool verifyChinaGame = args is ["--china-game", _];
 
 IReadOnlyList<AzurPromiliaRegion> regions = AzurPromiliaRegion.All;
 string[] profiles = ["AzurPromiliaCN", "AzurPromiliaJP", "AzurPromiliaTW", "AzurPromiliaKR"];
@@ -52,7 +57,7 @@ try
         Require(fallback.FileName == sites[index] && fallback.Arguments.Length == 0 && fallback.UseShellExecute,
             $"Unexpected website fallback for {profile}.");
 
-        bool verifyLocal = index < 2 && args.Length == 2 && (!verifyChinaOnly || index == 0);
+        bool verifyLocal = index < 2 && args.Length == 2 && !verifyChinaGame && (!verifyChinaOnly || index == 0);
         if (verifyLocal && region.Launcher is { } identity)
         {
             string officialDirectory = Path.GetFullPath(verifyChinaOnly ? args[1] : args[index]);
@@ -71,6 +76,38 @@ try
             Require(launch.FileName == officialLauncher && launch.WorkingDirectory == Path.GetDirectoryName(officialLauncher)
                 && launch.Arguments.Length == 0 && launch.UseShellExecute, $"Unsafe launch request for {profile}.");
         }
+    }
+
+    if (verifyChinaGame)
+    {
+        string directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[1]));
+        using JsonDocument publisherVersion = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "_index", "version")));
+        GameVersion expected = new(publisherVersion.RootElement.GetProperty("version").GetString()!);
+        plugin.GetPresetConfig(0, out var china);
+        china.comGet_GameManager(out IGameManager? game);
+        ArgumentNullException.ThrowIfNull(game);
+        china.comGet_GameExecutableName(out string executable);
+        Require(executable == "AzurPromilia.exe", "The China preset must expose the game executable.");
+
+        game.SetGamePath(temp.FullName);
+        game.IsGameInstalled(out bool installed);
+        Require(!installed, "A directory without the publisher's game files must not appear installed.");
+
+        foreach (string path in new[] { directory, Path.GetDirectoryName(directory)! })
+        {
+            game.SetGamePath(path);
+            game.IsGameInstalled(out installed);
+            game.GetGamePath(out string? active);
+            game.GetCurrentGameVersion(out GameVersion version);
+            game.GetApiGameVersion(out GameVersion remote);
+            game.IsGameHasUpdate(out bool update);
+            Guid request = Guid.CreateVersion7();
+            game.FindExistingInstallPathAsync(in request, out nint find);
+            string? found = await find.AsTask<PluginDisposableMemoryMarshal>().WaitAsync(TimeSpan.FromSeconds(15));
+            Require(installed && active == directory && found == directory && version == expected &&
+                remote == GameVersion.Empty && !update, "Collapse must recognize the publisher's existing game and local version.");
+        }
+        Console.WriteLine($"PASS: Recognized signed China game version {expected} at {directory}.");
     }
 }
 finally

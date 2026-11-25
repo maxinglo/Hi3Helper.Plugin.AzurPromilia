@@ -25,6 +25,7 @@ internal sealed record AzurPromiliaRegion(
     string? TraditionalChineseName = null,
     string? KoreanName = null,
     string? NativeGameExecutable = null,
+    string? ManjuuGameDirectoryName = null,
     Func<HttpClient, CancellationToken, Task<GameInstallPlan>>? LoadGameInstallPlan = null)
 {
     internal static AzurPromiliaRegion China { get; } = new(
@@ -36,7 +37,7 @@ internal sealed record AzurPromiliaRegion(
         new OfficialLauncherIdentity("launcher.exe", "蓝色星原：旅谣", "上海蛮奈网络科技有限公司",
             UninstallKey: "AzurPromilia_35_C000", VersionedDirectory: true),
         TraditionalChineseName: "陸服", KoreanName: "중국",
-        NativeGameExecutable: "AzurPromilia.exe");
+        NativeGameExecutable: "AzurPromilia.exe", ManjuuGameDirectoryName: "AzurPromilia_Game");
 
     internal static AzurPromiliaRegion Japan { get; } = new(
         "AzurPromiliaJP", "Japan", "日服", "日本版", "ja-JP", "Yostar",

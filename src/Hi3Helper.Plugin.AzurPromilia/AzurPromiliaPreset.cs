@@ -21,9 +21,7 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
     }
 
     public override string GameName => AzurPromiliaPlugin.GameDisplayName;
-    public override string GameExecutableName => _region.LoadGameInstallPlan is not null
-        ? _region.NativeGameExecutable ?? string.Empty
-        : _region.Launcher?.Executable ?? string.Empty;
+    public override string GameExecutableName => _region.NativeGameExecutable ?? _region.Launcher?.Executable ?? string.Empty;
     public override string GameAppDataPath => string.Empty;
     public override string GameLogFileName => string.Empty;
     public override string GameVendorName => _region.Publisher;

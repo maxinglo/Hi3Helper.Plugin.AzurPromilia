@@ -63,7 +63,7 @@ internal static class GameInstallerHostTests
             manager.InitAsync(in request, out initialized);
             await initialized.AsTask<int>().WaitAsync(TimeSpan.FromSeconds(15));
             manager.IsGameHasUpdate(out bool hasUpdate);
-            Require(hasUpdate, "A different verified version should surface the Update action.");
+            Require(hasUpdate, "A newer verified version should surface the Update action.");
 
             request = Guid.CreateVersion7();
             installer.StartUpdateAsync(null, states.Add, in request, out nint update);
@@ -73,6 +73,13 @@ internal static class GameInstallerHostTests
             Require(installedVersion == new GameVersion("1.0.0.31") && !hasUpdate &&
                 File.ReadAllBytes(Path.Combine(folder.FullName, Executable)).SequenceEqual(updatedFile),
                 "The normal Core update action must commit the new content and version.");
+
+            current = CreatePlan("1.0.0.30", initialFile);
+            request = Guid.CreateVersion7();
+            manager.InitAsync(in request, out initialized);
+            await initialized.AsTask<int>().WaitAsync(TimeSpan.FromSeconds(15));
+            manager.IsGameHasUpdate(out hasUpdate);
+            Require(!hasUpdate, "An older verified version must not surface the Update action.");
         }
         finally
         {

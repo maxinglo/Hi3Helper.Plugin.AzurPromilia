@@ -14,6 +14,7 @@ internal static class GameInstallTests
         {
             await TestResumeAndInstallAsync(temporary.FullName);
             await TestUnmanagedConflictAsync(Path.Combine(temporary.FullName, "conflict"));
+            await TestInsufficientSpaceAsync(Path.Combine(temporary.FullName, "full-disk"));
         }
         finally
         {
@@ -116,6 +117,16 @@ internal static class GameInstallTests
             Require(VerifiedGameInstaller.ReadInstalledVersion(root, update.Profile) == update.Version &&
                     (await File.ReadAllBytesAsync(destination)).SequenceEqual(replacement),
                 "Retrying an interrupted commit must apply the staged bytes and publish the new version.");
+
+            try
+            {
+                await installer.InstallAsync(root, plan, null, CancellationToken.None);
+                throw new InvalidOperationException("An older installation plan unexpectedly succeeded.");
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("older than the installed version", StringComparison.Ordinal)) { }
+            Require(VerifiedGameInstaller.ReadInstalledVersion(root, update.Profile) == update.Version &&
+                    (await File.ReadAllBytesAsync(destination)).SequenceEqual(replacement),
+                "Rejecting an older plan must preserve the verified installed version and files.");
         }
     }
 
@@ -136,6 +147,28 @@ internal static class GameInstallTests
         Require(await File.ReadAllTextAsync(conflict) == "Unrelated file." &&
                 VerifiedGameInstaller.ReadInstalledVersion(root, plan.Profile) is null,
             "An unrelated file conflict must not modify that file or publish metadata.");
+    }
+
+    private static async Task TestInsufficientSpaceAsync(string root)
+    {
+        Directory.CreateDirectory(root);
+        string unrelated = Path.Combine(root, "keep.txt");
+        await File.WriteAllTextAsync(unrelated, "Unrelated file.");
+        GameFile hugeFile = FileEntry("game/file.bin", "file.bin", [1]) with { Size = long.MaxValue };
+        GameInstallPlan plan = Plan(new Version(1, 0), 'e', [hugeFile]);
+        using var http = Client(_ => throw new InvalidOperationException("Space must be checked before contacting the CDN."));
+        var installer = new VerifiedGameInstaller(http);
+        try
+        {
+            await installer.InstallAsync(root, plan, null, CancellationToken.None);
+            throw new InvalidOperationException("An installation larger than the selected volume unexpectedly succeeded.");
+        }
+        catch (IOException ex) when (ex.Message.StartsWith("Insufficient remaining disk space.", StringComparison.Ordinal)) { }
+
+        string workspace = Path.Combine(root, ".collapse-azurpromilia");
+        Require(!Directory.Exists(Path.Combine(workspace, "stage")) && !File.Exists(Path.Combine(workspace, "pending.json")) &&
+                !Directory.Exists(Path.Combine(root, "game")) && await File.ReadAllTextAsync(unrelated) == "Unrelated file.",
+            "Insufficient space must not allocate staging payloads, start a pending install, or alter local files.");
     }
 
     private static GameInstallPlan Plan(Version version, char fingerprint, GameFile[] files) =>

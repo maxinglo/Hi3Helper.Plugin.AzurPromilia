@@ -30,6 +30,8 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
 
         HashSet<string> owned = ReadOwnedFiles(operation, plan);
         var batch = await PrepareAsync(operation, owned, token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        EnsureStagingSpace(operation.Root, batch.RemainingStagingBytes);
         await StageAsync(operation, batch, progress, token).ConfigureAwait(false);
 
         token.ThrowIfCancellationRequested();
@@ -85,6 +87,20 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         }
     }
 
+    private static void EnsureStagingSpace(string root, long required)
+    {
+        if (required == 0)
+            return;
+        long available = new DriveInfo(Path.GetPathRoot(root)!).AvailableFreeSpace;
+        if (available < required)
+        {
+            // Collapse recognizes this diagnostic to display the disk-space dialog. The reserve is zero.
+            throw new IOException(FormattableString.Invariant(
+                    $"Insufficient remaining disk space. Required {required} additional bytes including reserve; available {available} bytes."),
+                unchecked((int)0x80070070));
+        }
+    }
+
     private async Task StageAsync(Operation operation, DownloadBatch batch, Action<long, long>? progress,
         CancellationToken token)
     {
@@ -115,10 +131,11 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
     private static async Task<DownloadBatch> PrepareAsync(Operation operation, HashSet<string> owned,
         CancellationToken token)
     {
+        var parentDirectories = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (string directory in operation.Directories)
         {
             token.ThrowIfCancellationRequested();
-            FileAttributes? attributes = GetAttributes(Resolve(operation.Root, directory));
+            FileAttributes? attributes = Probe(ResolvePath(operation.Root, directory), parentDirectories);
             if (attributes is { } present && (present & FileAttributes.Directory) == 0)
                 throw new IOException("An existing file conflicts with a game index directory.");
         }
@@ -126,11 +143,12 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         var jobs = new List<DownloadJob>();
         long total = 0;
         long downloaded = 0;
+        long remainingStagingBytes = 0;
         foreach (FileLocation file in operation.Files)
         {
             token.ThrowIfCancellationRequested();
-            string destination = Resolve(operation.Root, file.Entry.InstallPath);
-            FileAttributes? attributes = GetAttributes(destination);
+            string destination = ResolvePath(operation.Root, file.Entry.InstallPath);
+            FileAttributes? attributes = Probe(destination, parentDirectories);
             if (attributes is { } present)
             {
                 if ((present & FileAttributes.Directory) != 0)
@@ -141,27 +159,34 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                     throw new IOException("An existing unowned file conflicts with the game index.");
             }
 
-            string partial = Resolve(operation.Root, file.PartialPath);
-            long cached = await GetCachedSizeAsync(partial, file.Entry, token).ConfigureAwait(false);
+            string partial = ResolvePath(operation.Root, file.PartialPath);
+            var (cached, stagingCredit) = await GetCachedSizeAsync(partial, Probe(partial, parentDirectories), file.Entry, token)
+                .ConfigureAwait(false);
             total = checked(total + file.Entry.Size);
             downloaded = checked(downloaded + cached);
+            remainingStagingBytes = checked(remainingStagingBytes + (file.Entry.Size - stagingCredit));
             jobs.Add(new DownloadJob(file, cached));
         }
-        return new DownloadBatch(jobs, total, downloaded);
+        return new DownloadBatch(jobs, total, downloaded, remainingStagingBytes);
     }
 
-    private static async Task<long> GetCachedSizeAsync(string path, GameFile file, CancellationToken token)
+    private static async Task<(long Downloaded, long StagingCredit)> GetCachedSizeAsync(string path,
+        FileAttributes? attributes, GameFile file, CancellationToken token)
     {
-        if (GetAttributes(path) is not { } attributes)
-            return 0;
-        if ((attributes & FileAttributes.Directory) != 0)
+        if (attributes is not { } present)
+            return (0, 0);
+        if ((present & FileAttributes.Directory) != 0)
             throw new IOException("A directory conflicts with a staged game file.");
         long size = new FileInfo(path).Length;
         if (size < file.Size)
-            return size;
+        {
+            // A restart might discard the prefix. Logical bytes in a sparse or compressed prefix may free less space.
+            long stagingCredit = (present & (FileAttributes.SparseFile | FileAttributes.Compressed)) == 0 ? size : 0;
+            return (size, stagingCredit);
+        }
         return size == file.Size && await VerifiedGameFileDownloader.VerifyAsync(path, file, token).ConfigureAwait(false)
-            ? size
-            : 0;
+            ? (size, size)
+            : (0, 0);
     }
 
     private static Operation CreateOperation(string installPath, GameInstallPlan plan)
@@ -231,6 +256,8 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
         Marker? installed = ReadMarker(operation.Root, InstalledMarker, hasFiles: true);
         if (installed is not null && !installed.Profile.Equals(plan.Profile, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The game directory is managed by a different region.");
+        if (installed is not null && plan.Version < installed.Version)
+            throw new InvalidOperationException("The selected game version is older than the installed version.");
         return installed?.Files ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -306,13 +333,32 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
 
     private static string Resolve(string root, string relativePath)
     {
-        string path = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-        if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("A game installation path escaped its root.");
-
+        string path = ResolvePath(root, relativePath);
         for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
             _ = GetAttributes(current);
         return path;
+    }
+
+    private static string ResolvePath(string root, string relativePath)
+    {
+        string path = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("A game installation path escaped its root.");
+        return path;
+    }
+
+    // Reuse parent probes during a read-only scan. Writes always resolve the current path again.
+    private static FileAttributes? Probe(string path, Dictionary<string, bool> parentDirectories)
+    {
+        string parent = Path.GetDirectoryName(path)!;
+        if (!parentDirectories.TryGetValue(parent, out bool exists))
+        {
+            exists = GetAttributes(parent) is { } attributes && (attributes & FileAttributes.Directory) != 0;
+            for (string? ancestor = Path.GetDirectoryName(parent); ancestor is not null; ancestor = Path.GetDirectoryName(ancestor))
+                _ = GetAttributes(ancestor);
+            parentDirectories.Add(parent, exists);
+        }
+        return exists ? GetAttributes(path) : null;
     }
 
     private static FileAttributes? GetAttributes(string path)
@@ -365,6 +411,6 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
     private sealed record Operation(string Root, string StageDirectory, FileLocation[] Files, HashSet<string> Directories);
     private sealed record FileLocation(GameFile Entry, string PartialPath, Uri Url);
     private sealed record DownloadJob(FileLocation File, long Cached);
-    private sealed record DownloadBatch(List<DownloadJob> Jobs, long Total, long Downloaded);
+    private sealed record DownloadBatch(List<DownloadJob> Jobs, long Total, long Downloaded, long RemainingStagingBytes);
     private sealed record Marker(string Profile, Version Version, string IndexSha256, HashSet<string> Files);
 }

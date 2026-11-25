@@ -16,7 +16,7 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
     protected override HttpClient ApiResponseHttpClient { get; set; } = new();
     protected override bool HasPreload => false;
     protected override bool HasUpdate => UsesNativeInstallation && IsInstalled &&
-        ApiGameVersion != GameVersion.Empty && CurrentGameVersion != ApiGameVersion;
+        ApiGameVersion > CurrentGameVersion;
 
     protected override bool IsInstalled => UsesNativeInstallation
         ? CurrentGameVersion != GameVersion.Empty &&

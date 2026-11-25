@@ -13,6 +13,7 @@ internal static class GameInstallTests
         try
         {
             await TestResumeAndInstallAsync(temporary.FullName);
+            await TestMirrorFailoverAsync(Path.Combine(temporary.FullName, "mirror"));
             await TestUnmanagedConflictAsync(Path.Combine(temporary.FullName, "conflict"));
             await TestInsufficientSpaceAsync(Path.Combine(temporary.FullName, "full-disk"));
         }
@@ -48,7 +49,8 @@ internal static class GameInstallTests
                 "Previously matching destination files must not count as required download bytes.");
             try
             {
-                await installer.InstallAsync(root, plan, (downloaded, _) =>
+                GameInstallPlan mirrored = plan with { BaseUris = [BaseUri, new Uri("https://mirror.example/assets/")] };
+                await installer.InstallAsync(root, mirrored, (downloaded, _) =>
                 {
                     if (downloaded == 2) cancellation.Cancel();
                 }, cancellation.Token);
@@ -128,6 +130,55 @@ internal static class GameInstallTests
                     (await File.ReadAllBytesAsync(destination)).SequenceEqual(replacement),
                 "Rejecting an older plan must preserve the verified installed version and files.");
         }
+    }
+
+    private static async Task TestMirrorFailoverAsync(string root)
+    {
+        byte[] oldBytes = [6, 7];
+        byte[] newBytes = [1, 2, 3, 4, 5];
+        const string local = "game/asset.bin";
+        const string remote = "objects/asset.bin";
+        string destination = Path.Combine(root, local);
+        GameInstallPlan installed = Plan(new Version(1, 0), 'f', [FileEntry(local, remote, oldBytes)]);
+        using (var first = Client(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(oldBytes) }))
+            await new VerifiedGameInstaller(first).InstallAsync(root, installed, null, CancellationToken.None);
+
+        Uri mirror = new("https://mirror.example/assets/");
+        GameInstallPlan update = Plan(new Version(1, 1), 'b', [FileEntry(local, remote, newBytes)]) with { BaseUris = [BaseUri, mirror] };
+        var requests = new List<(string? Url, string? Range)>();
+        using var http = Client(request =>
+        {
+            Require(VerifiedGameInstaller.ReadInstalledVersion(root, installed.Profile) == installed.Version &&
+                    File.ReadAllBytes(destination).SequenceEqual(oldBytes), "Source retries must leave the installed version and file intact.");
+            requests.Add((request.RequestUri?.AbsoluteUri, request.Headers.Range?.ToString()));
+            if (requests.Count == 1)
+            {
+                var interrupted = new StreamContent(new MemoryStream([9, 9]));
+                interrupted.Headers.ContentLength = newBytes.Length;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = interrupted };
+            }
+            if (requests.Count == 2)
+            {
+                var remainder = new ByteArrayContent(newBytes[2..]);
+                remainder.Headers.ContentRange = new ContentRangeHeaderValue(2, 4, newBytes.Length);
+                return new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = remainder };
+            }
+            Require(requests.Count == 3, "Source recovery must attempt a clean transfer only once.");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(newBytes) };
+        });
+
+        var progress = new List<(long Downloaded, long Total)>();
+        await new VerifiedGameInstaller(http).InstallAsync(root, update, (done, total) => progress.Add((done, total)), CancellationToken.None);
+        Require(requests.SequenceEqual([
+            ("https://example.invalid/publisher/assets/objects/asset.bin", null),
+            ("https://mirror.example/assets/objects/asset.bin", "bytes=2-4"),
+            ("https://mirror.example/assets/objects/asset.bin", null)]),
+            "The last mirror must resume the interrupted transfer and then restart when the old prefix fails verification.");
+        Require(progress[0] == (0L, 5L) && progress.Contains((2L, 5L)) && progress.Count(value => value == (0L, 5L)) >= 2 &&
+                progress[^1] == (5L, 5L) && progress.All(value => value.Downloaded >= 0 && value.Downloaded <= value.Total),
+            "Progress must remove invalid staged bytes before counting the clean download.");
+        Require(VerifiedGameInstaller.ReadInstalledVersion(root, update.Profile) == update.Version &&
+                (await File.ReadAllBytesAsync(destination)).SequenceEqual(newBytes), "Only verified staging can replace the installed file.");
     }
 
     private static async Task TestUnmanagedConflictAsync(string root)

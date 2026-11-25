@@ -68,7 +68,7 @@ internal static class GameIndexTests
         string digest = Convert.ToHexString(MD5.HashData(payload));
         using var handler = new IndexFixture(payload);
         using var http = new HttpClient(handler);
-        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "primary.example", "mirror.example" };
+        var hosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "primary.example", "mirror.example", "spare.example" };
         using JsonDocument configuration = JsonDocument.Parse($$"""
             {
               "code": 0,
@@ -76,7 +76,8 @@ internal static class GameIndexTests
                 "released": { "versionCode": "1.0.0.29" },
                 "preload": {
                   "versionCode": "1.0.0.30",
-                  "domainList": ["https://unlisted.example/", "https://primary.example/prod", "https://mirror.example/game/"],
+                  "domainList": ["https://unlisted.example/", "https://primary.example/prod", "https://primary.example/prod/",
+                                 "https://mirror.example:8443/game/", "https://mirror.example/game/", "https://spare.example/assets"],
                   "gameExcludedFileList": ["AzurPromilia.exe"],
                   "gamePackageList": [
                     { "packageType": 1, "downloadUrl": "slice.bin" },
@@ -90,10 +91,11 @@ internal static class GameIndexTests
             preload: true, hosts, cipher.Key, cipher.IV, CancellationToken.None);
         Require(handler.Requests.SequenceEqual(["https://primary.example/prod/index/1.0.0.30", "https://mirror.example/game/index/1.0.0.30"]) &&
             plan.Profile == "AzurPromiliaCN" && plan.Version == new Version(1, 0, 0, 30) &&
-            plan.BaseUri == new Uri("https://mirror.example/game/") &&
+            plan.BaseUris.SequenceEqual([new Uri("https://mirror.example/game/"), new Uri("https://primary.example/prod/"),
+                new Uri("https://spare.example/assets/")]) &&
             plan.IndexSha256 == Convert.ToHexStringLower(SHA256.HashData(payload)) &&
             plan.Files.SequenceEqual([new GameFile(3, Md5, "AzurPromilia.exe", "objects/game.exe")]),
-            "A verified preload index must retain its version, fingerprint and file paths using the successful publisher CDN.");
+            "The verified index source must lead the configured, allowed CDN roots without duplicate or unapproved roots.");
 
         foreach (var response in new[] { default(JsonElement), configuration.RootElement })
         {

@@ -3,6 +3,7 @@ using System.Text.Json;
 
 namespace Hi3Helper.Plugin.AzurPromilia.GameData;
 
+// Install only files listed in the official launcher index. The game manages its supplemental resources and shaders.
 internal sealed class VerifiedGameInstaller(HttpClient http)
 {
     private const string Workspace = ".collapse-azurpromilia";
@@ -115,8 +116,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = token }, async (job, innerToken) =>
             {
                 long previous = job.Cached;
-                await VerifiedGameFileDownloader.DownloadAsync(http, job.File.Url, Resolve(operation.Root, job.File.PartialPath),
-                    job.File.Entry, bytes =>
+                await DownloadFileAsync(operation, job, bytes =>
                     {
                         lock (progressLock)
                         {
@@ -126,6 +126,41 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                         }
                     }, innerToken).ConfigureAwait(false);
             }).ConfigureAwait(false);
+    }
+
+    // Give a mirror one clean attempt if the staged prefix fails verification after a resume.
+    private async Task DownloadFileAsync(Operation operation, DownloadJob job, Action<long> progress, CancellationToken token)
+    {
+        int source = 0;
+        long staged = job.Cached;
+        GameFile file = job.File.Entry;
+        void Report(long bytes)
+        {
+            staged = bytes;
+            progress(bytes);
+        }
+
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            Uri root = operation.CdnRoots[source];
+            if (!GameCdn.TryResolvePath(root, job.File.EscapedRemotePath, out Uri? url))
+                throw new InvalidDataException("A game file path escaped the publisher CDN base URI.");
+            string partial = Resolve(operation.Root, job.File.PartialPath);
+            bool resumed = staged > 0 && staged < file.Size;
+            try
+            {
+                await VerifiedGameFileDownloader.DownloadAsync(http, url, partial, file, Report, token).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception error) when (operation.CdnRoots.Count > 1 && GameCdn.IsTransferFailure(error, token))
+            {
+                if (resumed && staged == 0 && error is InvalidDataException)
+                    continue;
+                if (++source == operation.CdnRoots.Count)
+                    throw;
+            }
+        }
     }
 
     private static async Task<DownloadBatch> PrepareAsync(Operation operation, HashSet<string> owned,
@@ -196,12 +231,16 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
             !IsHex(plan.IndexSha256, 64) || plan.Files.Count == 0)
             throw new InvalidDataException("The game install plan identity is invalid.");
 
-        Uri baseUri = plan.BaseUri;
-        if (!baseUri.IsAbsoluteUri || baseUri.Scheme != Uri.UriSchemeHttps || baseUri.UserInfo.Length != 0 ||
-            baseUri.Query.Length != 0 || baseUri.Fragment.Length != 0)
-            throw new InvalidDataException("The game install plan requires a clean HTTPS CDN base URI.");
-        if (!baseUri.AbsolutePath.EndsWith('/'))
-            baseUri = new Uri(baseUri.AbsoluteUri + '/');
+        var cdnRoots = new List<Uri>(plan.BaseUris.Count);
+        foreach (Uri candidate in plan.BaseUris)
+        {
+            if (!GameCdn.TryNormalizeRoot(candidate, out Uri? cdnRoot))
+                throw new InvalidDataException("The game install plan requires clean HTTPS CDN base URIs.");
+            if (!cdnRoots.Contains(cdnRoot))
+                cdnRoots.Add(cdnRoot);
+        }
+        if (cdnRoots.Count == 0)
+            throw new InvalidDataException("The game install plan does not contain a publisher CDN.");
 
         string stageDirectory = $"{Workspace}/stage/{plan.Profile}/{plan.Version}/{plan.IndexSha256.ToLowerInvariant()}";
         var files = new FileLocation[plan.Files.Count];
@@ -224,13 +263,8 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                 throw new InvalidDataException("The game install plan contains an invalid or duplicate file.");
 
             string remotePath = string.Join('/', entry.RemotePath.Split('/').Select(Uri.EscapeDataString));
-            Uri url = new(baseUri, remotePath);
-            if (url.Scheme != Uri.UriSchemeHttps || url.Authority != baseUri.Authority ||
-                !url.AbsolutePath.StartsWith(baseUri.AbsolutePath, StringComparison.Ordinal))
-                throw new InvalidDataException("A game file path escaped the publisher CDN base URI.");
-
             string name = index.ToString("x8", CultureInfo.InvariantCulture) + ".part";
-            files[index] = new FileLocation(entry, $"{stageDirectory}/{name}", url);
+            files[index] = new FileLocation(entry, $"{stageDirectory}/{name}", remotePath);
         }
 
         foreach (string path in pathKinds.Keys)
@@ -243,7 +277,7 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
                 directories.Add(parent);
             }
         }
-        return new Operation(root, stageDirectory, files, directories);
+        return new Operation(root, stageDirectory, cdnRoots, files, directories);
     }
 
     private static HashSet<string> ReadOwnedFiles(Operation operation, GameInstallPlan plan)
@@ -408,8 +442,8 @@ internal sealed class VerifiedGameInstaller(HttpClient http)
 
     private static bool IsHex(string value, int size) => value.Length == size && value.All(char.IsAsciiHexDigit);
 
-    private sealed record Operation(string Root, string StageDirectory, FileLocation[] Files, HashSet<string> Directories);
-    private sealed record FileLocation(GameFile Entry, string PartialPath, Uri Url);
+    private sealed record Operation(string Root, string StageDirectory, List<Uri> CdnRoots, FileLocation[] Files, HashSet<string> Directories);
+    private sealed record FileLocation(GameFile Entry, string PartialPath, string EscapedRemotePath);
     private sealed record DownloadJob(FileLocation File, long Cached);
     private sealed record DownloadBatch(List<DownloadJob> Jobs, long Total, long Downloaded, long RemainingStagingBytes);
     private sealed record Marker(string Profile, Version Version, string IndexSha256, HashSet<string> Files);

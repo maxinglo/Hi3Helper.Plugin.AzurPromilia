@@ -8,6 +8,7 @@ internal static class ManjuuReleaseIndex
 {
     private const int FilePackageType = 2;
 
+    // The caller supplies a CDN client with automatic redirects disabled.
     internal static async Task<GameInstallPlan> LoadAsync(HttpClient cdn, string profile, JsonElement response,
         bool preload, IReadOnlySet<string> publisherHosts, ReadOnlyMemory<byte> formatKey, ReadOnlyMemory<byte> iv,
         CancellationToken token)
@@ -45,32 +46,30 @@ internal static class ManjuuReleaseIndex
         if (roots.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("The publisher's game release is missing its CDN list.");
 
+        var allowedRoots = new List<(Uri Root, Uri Index)>();
+        var seenRoots = new HashSet<Uri>();
+        foreach (JsonElement entry in roots.EnumerateArray())
+        {
+            string? cdnRoot = entry.ValueKind == JsonValueKind.String ? entry.GetString() : null;
+            if (Uri.TryCreate(cdnRoot, UriKind.Absolute, out Uri? candidate) &&
+                GameCdn.TryNormalizeRoot(candidate, out Uri? root) && root.IsDefaultPort && publisherHosts.Contains(root.IdnHost) &&
+                GameCdn.TryResolvePath(root, remotePath.TrimStart('/'), out Uri? indexUri) && seenRoots.Add(root))
+                allowedRoots.Add((root, indexUri));
+        }
+
         var indexFile = new GameFile(size, digest, string.Empty, remotePath);
         string temporary = Path.GetTempFileName();
         try
         {
             Exception? failure = null;
-            foreach (JsonElement entry in roots.EnumerateArray())
+            foreach (var (root, indexUri) in allowedRoots)
             {
-                string? cdnRoot = entry.ValueKind == JsonValueKind.String ? entry.GetString() : null;
-                if (!Uri.TryCreate(cdnRoot, UriKind.Absolute, out Uri? baseUri) || baseUri.Scheme != Uri.UriSchemeHttps ||
-                    !publisherHosts.Contains(baseUri.IdnHost) || !baseUri.IsDefaultPort || baseUri.UserInfo.Length != 0 ||
-                    baseUri.Query.Length != 0 || baseUri.Fragment.Length != 0)
-                    continue;
-
-                if (!baseUri.AbsolutePath.EndsWith('/'))
-                    baseUri = new Uri(baseUri.AbsoluteUri + '/');
-                if (!Uri.TryCreate(baseUri, remotePath.TrimStart('/'), out Uri? indexUri) ||
-                    indexUri.Authority != baseUri.Authority || indexUri.Scheme != baseUri.Scheme ||
-                    !indexUri.AbsolutePath.StartsWith(baseUri.AbsolutePath, StringComparison.Ordinal))
-                    continue;
-
                 try
                 {
                     await VerifiedGameFileDownloader.DownloadAsync(cdn, indexUri, temporary, indexFile, null, token)
                         .ConfigureAwait(false);
                 }
-                catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException)
+                catch (Exception error) when (GameCdn.IsTransferFailure(error, token))
                 {
                     failure = error;
                     using FileStream discarded = File.Open(temporary, FileMode.Truncate, FileAccess.Write);
@@ -82,7 +81,8 @@ internal static class ManjuuReleaseIndex
                 input.Position = 0;
                 ManjuuGameIndex parsed = ManjuuGameIndex.ReadEncrypted(input, formatKey.Span, iv.Span);
                 token.ThrowIfCancellationRequested();
-                return new GameInstallPlan(profile, version, identity, baseUri, parsed.Files, parsed.Directories);
+                Uri[] orderedRoots = [root, .. allowedRoots.Select(source => source.Root).Where(other => other != root)];
+                return new GameInstallPlan(profile, version, identity, orderedRoots, parsed.Files, parsed.Directories);
             }
 
             throw new InvalidDataException("The publisher's verified package index is unavailable from its configured CDNs.", failure);

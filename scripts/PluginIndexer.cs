@@ -60,8 +60,8 @@ public static unsafe class PluginIndexer
 
             int presetCount = 0;
             Marshal.ThrowExceptionForHR(((delegate* unmanaged[MemberFunction]<nint, int*, int>)table[8])(plugin, &presetCount));
-            if (presetCount != 2)
-                throw new InvalidDataException("Expected the China and Japan presets.");
+            if (presetCount != 4)
+                throw new InvalidDataException("Expected the China, Japan, Taiwan, and Korea presets.");
 
             nint updater = 0;
             Marshal.ThrowExceptionForHR(((delegate* unmanaged[MemberFunction]<nint, nint*, int>)table[15])(plugin, &updater));

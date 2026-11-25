@@ -15,10 +15,10 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
 
     internal string? GetInstallDirectory(string? directory)
     {
-        if (region.VersionedLauncherDirectory && !string.IsNullOrEmpty(directory)
+        if (region.Launcher is { VersionedDirectory: true } launcher && !string.IsNullOrEmpty(directory)
             && Path.IsPathFullyQualified(directory)
             && Version.TryParse(Path.GetFileName(Path.TrimEndingDirectorySeparator(directory)), out _)
-            && MatchesProduct(Path.Combine(directory, region.LauncherExecutable)))
+            && MatchesProduct(Path.Combine(directory, launcher.Executable)))
             return Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory));
 
         return directory;
@@ -38,19 +38,22 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
 
     private string? FindLauncher(string? configuredDirectory)
     {
+        if (region.Launcher is not { } launcher)
+            return null;
+
         return GetInstalledDirectories().Prepend(configuredDirectory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .SelectMany(GetCandidatePaths)
-            .FirstOrDefault(path => MatchesProduct(path) && Authenticode.IsSignedBy(path, region.LauncherSigner));
+            .FirstOrDefault(path => MatchesProduct(path) && Authenticode.IsSignedBy(path, launcher.Signer));
     }
 
     private IEnumerable<string> GetCandidatePaths(string? directory)
     {
-        if (string.IsNullOrWhiteSpace(directory) || !Path.IsPathFullyQualified(directory))
+        if (region.Launcher is not { } launcher || string.IsNullOrWhiteSpace(directory) || !Path.IsPathFullyQualified(directory))
             yield break;
 
-        yield return Path.GetFullPath(Path.Combine(directory, region.LauncherExecutable));
-        if (!region.VersionedLauncherDirectory)
+        yield return Path.GetFullPath(Path.Combine(directory, launcher.Executable));
+        if (!launcher.VersionedDirectory)
             yield break;
 
         // Manjuu updates its launcher inside a versioned directory under the permanent install location.
@@ -60,19 +63,19 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
                      .OrderByDescending(entry => entry.Version)
                      .Select(entry => entry.Path))
         {
-            yield return Path.GetFullPath(Path.Combine(versionedDirectory, region.LauncherExecutable));
+            yield return Path.GetFullPath(Path.Combine(versionedDirectory, launcher.Executable));
         }
     }
 
     private bool MatchesProduct(string candidate)
     {
-        if (!File.Exists(candidate))
+        if (region.Launcher is not { } launcher || !File.Exists(candidate))
             return false;
 
         try
         {
             FileVersionInfo version = FileVersionInfo.GetVersionInfo(candidate);
-            return version.ProductName == region.LauncherProductName && version.CompanyName == region.LauncherSigner;
+            return version.ProductName == launcher.ProductName && version.CompanyName == launcher.Signer;
         }
         catch (FileNotFoundException)
         {
@@ -94,25 +97,25 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
 
     private IEnumerable<string> GetInstalledDirectories()
     {
-        if (region.UninstallKey is null)
+        if (region.Launcher?.UninstallKey is not { } uninstallKey)
             yield break;
 
         foreach (RegistryHive hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
         {
             foreach (RegistryView view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
             {
-                if (ReadRegisteredDirectory(hive, view) is { } directory)
+                if (ReadRegisteredDirectory(hive, view, uninstallKey) is { } directory)
                     yield return directory;
             }
         }
     }
 
-    private string? ReadRegisteredDirectory(RegistryHive hive, RegistryView view)
+    private static string? ReadRegisteredDirectory(RegistryHive hive, RegistryView view, string uninstallKey)
     {
         try
         {
             using RegistryKey root = RegistryKey.OpenBaseKey(hive, view);
-            using RegistryKey? app = root.OpenSubKey(UninstallRegistryPath + region.UninstallKey);
+            using RegistryKey? app = root.OpenSubKey(UninstallRegistryPath + uninstallKey);
             return app?.GetValue("InstallLocation") as string;
         }
         catch (Exception ex) when (ex is SecurityException or UnauthorizedAccessException or IOException)

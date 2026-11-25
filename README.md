@@ -1,11 +1,13 @@
 # Azur Promilia for Collapse Launcher
 
-Adds support for the mainland China and Japan editions of Azur Promilia to Collapse Launcher.
+Shows official Azur Promilia news, events, and community links in Collapse Launcher for mainland China, Japan, Taiwan, and Korea.
 
 | Region | Official launcher |
 | --- | --- |
 | 中国大陆 · 蓝色星原：旅谣 | [Manjuu](https://azurpromilia.manjuu.com/) |
 | 日本 · アズールプロミリア | [Yostar](https://azurpromilia.jp/) |
+| 台灣 · 藍色星原：旅謠 | [JIMI](https://azurpromilia.jimi-global.com/home/) |
+| 한국 · 아주르 프로밀리아 | [Nexon](https://azurpromilia.nexon.com/main) |
 
 ## Installation
 
@@ -13,7 +15,7 @@ Adds support for the mainland China and Japan editions of Azur Promilia to Colla
 2. Import the ZIP in Collapse Launcher under **Settings → Plugin Management**, then restart Collapse.
 3. Select Azur Promilia and your region. If Collapse asks for an install folder, select the folder that contains the official launcher installation, including any launcher version folders.
 
-Collapse opens the matching official launcher. Use that launcher to install, update, or repair the game and sign in. If the official launcher is missing, the plugin opens the publisher's download page.
+Collapse opens a recognized official launcher. If one is unavailable, Collapse opens the region's publisher website. Game installation, updates, repairs, and sign-in currently use the publisher's application.
 
 ## Plugin updates
 

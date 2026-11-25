@@ -17,20 +17,22 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
         GameManager = manager;
         GameInstaller = new OfficialLauncherInstaller(manager);
         LauncherApiMedia = new OfficialLauncherMedia(region.BackgroundUrl);
-        LauncherApiNews = new OfficialLauncherNews();
+        LauncherApiNews = new OfficialLauncherNews(region.ProfileName, region.LoadContent);
     }
 
-    public override string GameName => AzurPromiliaPlugin.Localize("Azur Promilia", "蓝色星原：旅谣", "アズールプロミリア");
-    public override string GameExecutableName => _region.LauncherExecutable;
+    public override string GameName => AzurPromiliaPlugin.GameDisplayName;
+    public override string GameExecutableName => _region.Launcher?.Executable ?? string.Empty;
     public override string GameAppDataPath => string.Empty;
     public override string GameLogFileName => string.Empty;
     public override string GameVendorName => _region.Publisher;
     public override string GameRegistryKeyName => ProfileName;
     public override string ProfileName => _region.ProfileName;
-    public override string ZoneName => AzurPromiliaPlugin.Localize(_region.EnglishName, _region.ChineseName, _region.JapaneseName);
+    public override string ZoneName => AzurPromiliaPlugin.Localize(
+        _region.EnglishName, _region.ChineseName, _region.JapaneseName, _region.TraditionalChineseName, _region.KoreanName);
     public override string ZoneFullName => $"{GameName} - {ZoneName}";
     public override string ZoneDescription => AzurPromiliaPlugin.Localize(
-        $"{ZoneName} official Windows launcher", $"{ZoneName}官方 Windows 启动器", $"{ZoneName}公式 Windows ランチャー");
+        $"{ZoneName} official site and community", $"{ZoneName}官方网站及社区", $"{ZoneName}公式サイト・コミュニティ",
+        $"{ZoneName}官方網站及社群", $"{ZoneName} 공식 웹사이트 및 커뮤니티");
     public override string ZoneLogoUrl => _region.LogoUrl;
     public override string ZonePosterUrl => _region.BackgroundUrl;
     public override string ZoneHomePageUrl => _region.Website;

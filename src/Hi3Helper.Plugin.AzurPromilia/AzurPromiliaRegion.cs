@@ -51,7 +51,7 @@ internal sealed record AzurPromiliaRegion(
         "AzurPromiliaTW", "Taiwan", "台服", "台湾版", "zh-TW", "JIMI",
         "https://azurpromilia.jimi-global.com/home/",
         "https://webstatic.jimi-global.com/web/static/azurpromilia.jimi-global.com/home/assets/poster-C-PmzHX_.jpg",
-        "https://webstatic.manjuu.com/web-kits/footer/game-logo-zh-tw.4af614f70106.svg",
+        "https://plat-cdn.manjuu.com/p3-SocialMedia/20240314-104900.png",
         TaiwanLauncherContentSource.LoadAsync,
         KoreanName: "대만");
 

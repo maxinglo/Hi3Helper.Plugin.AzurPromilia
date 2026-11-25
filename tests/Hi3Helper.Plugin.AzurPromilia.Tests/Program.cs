@@ -27,6 +27,8 @@ try
         preset.comGet_ZoneLogoUrl(out string logo);
         Require(profile == profiles[index] && website == sites[index], "Unexpected preset identity.");
         Require(IsHttps(poster) && IsHttps(logo), $"Collapse artwork is missing for {profile}.");
+        Require(!new Uri(logo).AbsolutePath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase),
+            $"Collapse's first-run screen requires a raster logo for {profile}.");
 
         preset.comGet_GameManager(out var manager);
         preset.comGet_GameInstaller(out var installer);

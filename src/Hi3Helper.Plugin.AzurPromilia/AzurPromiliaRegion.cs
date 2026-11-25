@@ -26,7 +26,7 @@ internal sealed record AzurPromiliaRegion(
     string? KoreanName = null,
     string? NativeGameExecutable = null,
     string? ManjuuGameDirectoryName = null,
-    Func<HttpClient, CancellationToken, Task<GameInstallPlan>>? LoadGameInstallPlan = null,
+    Func<HttpClient, CancellationToken, Func<string?>, Task<GameInstallPlan>>? LoadGameInstallPlan = null,
     string? BackgroundVideoUrl = null)
 {
     internal static AzurPromiliaRegion China { get; } = new(
@@ -39,6 +39,7 @@ internal sealed record AzurPromiliaRegion(
             UninstallKey: "AzurPromilia_35_C000", VersionedDirectory: true),
         TraditionalChineseName: "陸服", KoreanName: "중국",
         NativeGameExecutable: "AzurPromilia.exe", ManjuuGameDirectoryName: "AzurPromilia_Game",
+        LoadGameInstallPlan: ChinaGameReleaseSource.LoadAsync,
         BackgroundVideoUrl: "https://l1-all-plat-server.manjuu.com/azurpromilia/video/93cdd43e096046138053253dc56d3562/1795598820421_ECAYRBMANXOB启动器动态图片适配与延展.mp4");
 
     internal static AzurPromiliaRegion Japan { get; } = new(

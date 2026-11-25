@@ -14,7 +14,7 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
     private readonly OfficialLauncherLocator _locator = new(region);
     private GameInstallPlan? _installPlan;
 
-    protected override HttpClient ApiResponseHttpClient { get; set; } = new();
+    protected override HttpClient ApiResponseHttpClient { get; set; } = new(new SocketsHttpHandler { AllowAutoRedirect = false });
     protected override bool HasPreload => false;
     protected override bool HasUpdate => UsesNativeInstallation && IsInstalled &&
         ApiGameVersion > CurrentGameVersion;
@@ -38,7 +38,9 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
         {
             version = VerifiedGameInstaller.ReadInstalledVersion(CurrentGameInstallPath, region.ProfileName);
         }
-        else if (FindManjuuInstallation(CurrentGameInstallPath) is { } installed)
+        if (version is null && (!UsesNativeInstallation || string.IsNullOrWhiteSpace(CurrentGameInstallPath) ||
+                !VerifiedGameInstaller.HasPendingInstallation(CurrentGameInstallPath)) &&
+            FindManjuuInstallation(CurrentGameInstallPath) is { } installed)
         {
             CurrentGameInstallPath = installed.Path;
             version = installed.Version;
@@ -64,7 +66,7 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
 
         try
         {
-            GameInstallPlan plan = await load(ApiResponseHttpClient, token).ConfigureAwait(false);
+            GameInstallPlan plan = await load(ApiResponseHttpClient, token, FindLocalOfficialLauncherVersionDirectory).ConfigureAwait(false);
             if (!string.Equals(plan.Profile, region.ProfileName, StringComparison.Ordinal) ||
                 region.NativeGameExecutable is not { } executable ||
                 !plan.Files.Any(file => string.Equals(file.InstallPath, executable, StringComparison.OrdinalIgnoreCase)))
@@ -89,10 +91,10 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
     protected override Task<string?> FindExistingInstallPathAsyncInner(CancellationToken token) =>
         Task.Run(() =>
         {
-            if (UsesNativeInstallation)
-                return IsInstalled ? CurrentGameInstallPath : null;
+            if (UsesNativeInstallation && IsInstalled)
+                return CurrentGameInstallPath;
             if (region.ManjuuGameDirectoryName is null)
-                return _locator.FindExisting(CurrentGameInstallPath);
+                return UsesNativeInstallation ? null : _locator.FindExisting(CurrentGameInstallPath);
 
             return FindManjuuInstallation(CurrentGameInstallPath)?.Path ??
                 FindManjuuInstallation(_locator.FindExisting(GetLauncherSearchPath()))?.Path;
@@ -118,6 +120,10 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
     }
 
     internal string? FindLocalOfficialLauncherDirectory() => _locator.FindExisting(GetLauncherSearchPath(), requireLocalFile: true);
+
+    private string? FindLocalOfficialLauncherVersionDirectory() =>
+        FindLocalOfficialLauncherDirectory() is { } root && _locator.FindCandidate(root) is { } launcher
+            ? Path.GetDirectoryName(launcher) : null;
 
     internal string? GetInstalledExecutablePath() =>
         CurrentGameVersion != GameVersion.Empty && region.NativeGameExecutable is { } executable &&

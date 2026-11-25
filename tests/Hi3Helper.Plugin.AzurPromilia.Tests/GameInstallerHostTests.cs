@@ -17,7 +17,7 @@ internal static class GameInstallerHostTests
         GameInstallPlan current = CreatePlan("1.0.0.30", initialFile);
         var region = AzurPromiliaRegion.China with
         {
-            LoadGameInstallPlan = (_, _) => Task.FromResult(current)
+            LoadGameInstallPlan = (_, _, _) => Task.FromResult(current)
         };
 
         var manager = new OfficialLauncherManager(region);

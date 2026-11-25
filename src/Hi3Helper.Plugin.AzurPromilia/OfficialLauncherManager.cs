@@ -100,6 +100,12 @@ internal sealed partial class OfficialLauncherManager(AzurPromiliaRegion region)
 
     internal void OpenOfficialLauncher() => Process.Start(_locator.CreateStartInfo(GetLauncherSearchPath()))?.Dispose();
 
+    internal string? GetInstalledExecutablePath() =>
+        CurrentGameVersion != GameVersion.Empty && region.NativeGameExecutable is { } executable &&
+        CurrentGameInstallPath is { } directory && Path.IsPathFullyQualified(directory)
+            ? Path.GetFullPath(Path.Combine(directory, executable))
+            : null;
+
     private (string Path, Version Version)? FindManjuuInstallation(string? candidate)
     {
         if (region.ManjuuGameDirectoryName is not { } folder || region.NativeGameExecutable is not { } executable ||

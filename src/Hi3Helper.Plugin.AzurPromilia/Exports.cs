@@ -27,11 +27,21 @@ public sealed class Exports : SharedStaticV1Ext<Exports>
     protected override bool IsGameRunningCore(GameManagerExtension.RunGameFromGameManagerContext context,
         out bool running, out DateTime started)
     {
-        running = false;
-        started = default;
+        using InstalledGameProcess? game = InstalledGameProcess.Find(((OfficialLauncherManager)context.GameManager).GetInstalledExecutablePath());
+        running = game is not null;
+        started = game?.Started ?? default;
         return true;
     }
 
     protected override (bool IsSupported, Task<bool> Task) WaitRunningGameCoreAsync(
-        GameManagerExtension.RunGameFromGameManagerContext context, CancellationToken token) => (true, Task.FromResult(true));
+        GameManagerExtension.RunGameFromGameManagerContext context, CancellationToken token) =>
+        (true, WaitForGameAsync(((OfficialLauncherManager)context.GameManager).GetInstalledExecutablePath(), token));
+
+    private static async Task<bool> WaitForGameAsync(string? executable, CancellationToken token)
+    {
+        using InstalledGameProcess? game = InstalledGameProcess.Find(executable);
+        if (game is not null)
+            await game.WaitForExitAsync(token).ConfigureAwait(false);
+        return true;
+    }
 }

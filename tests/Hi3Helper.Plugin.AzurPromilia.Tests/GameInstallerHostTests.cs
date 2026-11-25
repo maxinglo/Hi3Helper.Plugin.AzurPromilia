@@ -26,6 +26,7 @@ internal static class GameInstallerHostTests
         var states = new List<InstallProgressState>();
         try
         {
+            await CheckProcessObservationAsync(folder.FullName);
             Guid request = Guid.CreateVersion7();
             manager.InitAsync(in request, out nint initialized);
             Require(await initialized.AsTask<int>().WaitAsync(TimeSpan.FromSeconds(15)) == 0, "Game manager initialization failed.");
@@ -87,6 +88,29 @@ internal static class GameInstallerHostTests
             manager.Dispose();
             folder.Delete(recursive: true);
         }
+    }
+
+    private static async Task CheckProcessObservationAsync(string otherDirectory)
+    {
+        string executable = Environment.ProcessPath ?? throw new InvalidOperationException("Missing test process path.");
+        using InstalledGameProcess? current = InstalledGameProcess.Find(executable);
+        ArgumentNullException.ThrowIfNull(current);
+        Require(current.Started > DateTime.MinValue && current.Started <= DateTime.Now,
+            "A running executable must report its process start time.");
+
+        using InstalledGameProcess? sameName = InstalledGameProcess.Find(Path.Combine(otherDirectory, Path.GetFileName(executable)));
+        Require(sameName is null, "The same filename in a different directory must not count as a running game.");
+
+        using var cancellation = new CancellationTokenSource();
+        Task waiting = current.WaitForExitAsync(cancellation.Token);
+        Require(!waiting.IsCompleted, "Waiting must continue while the observed process is running.");
+        cancellation.Cancel();
+        try
+        {
+            await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+            throw new InvalidOperationException("Cancelling the wait must release it without stopping the process.");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
     private static GameInstallPlan CreatePlan(string version, byte[] payload)

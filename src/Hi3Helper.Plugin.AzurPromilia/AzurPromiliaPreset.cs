@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices.Marshalling;
+using Hi3Helper.Plugin.AzurPromilia.Content;
 using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.Plugin.Core.Management.Api;
 using Hi3Helper.Plugin.Core.Management.PresetConfig;
@@ -17,11 +18,14 @@ internal sealed partial class AzurPromiliaPreset : PluginPresetConfigBase
         var manager = new OfficialLauncherManager(region);
         GameManager = manager;
         GameInstaller = new OfficialLauncherInstaller(manager);
+        bool isChina = region.ProfileName == AzurPromiliaRegion.China.ProfileName;
         // Refresh the China launcher's public background on initialization and offer its video and still separately.
         _media = new OfficialLauncherMedia(region.BackgroundUrl, region.BackgroundVideoUrl,
-            region.ProfileName == AzurPromiliaRegion.China.ProfileName ? manager.FindLocalOfficialLauncherDirectory : null);
+            isChina ? manager.FindLocalOfficialLauncherDirectory : null);
         LauncherApiMedia = _media;
-        LauncherApiNews = new OfficialLauncherNews(region.ProfileName, region.LoadContent);
+        LauncherApiNews = new OfficialLauncherNews(region.ProfileName, isChina
+            ? (http, token) => ChinaLauncherContentSource.LoadAsync(http, token, manager.FindLocalOfficialLauncherDirectory)
+            : region.LoadContent);
     }
 
     public override string GameName => AzurPromiliaPlugin.GameDisplayName;

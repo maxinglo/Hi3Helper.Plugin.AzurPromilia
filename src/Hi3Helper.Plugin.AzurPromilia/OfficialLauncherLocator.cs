@@ -9,7 +9,9 @@ internal sealed class OfficialLauncherLocator(AzurPromiliaRegion region)
 {
     private const string UninstallRegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\";
 
-    internal string? FindCandidate(string? directory) => GetCandidatePaths(directory).FirstOrDefault(MatchesProduct);
+    internal string? FindCandidate(string? directory) => region.Launcher is { } launcher
+        ? GetCandidatePaths(directory).FirstOrDefault(path => MatchesProduct(path) && Authenticode.IsSignedBy(path, launcher.Signer))
+        : null;
 
     internal string? FindExisting(string? configuredDirectory, bool requireLocalFile = false) =>
         FindLauncher(configuredDirectory, requireLocalFile) is { } launcher ? GetInstallDirectory(Path.GetDirectoryName(launcher)) : null;

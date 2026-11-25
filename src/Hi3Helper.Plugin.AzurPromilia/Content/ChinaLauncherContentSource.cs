@@ -18,4 +18,12 @@ internal static class ChinaLauncherContentSource
 
     internal static Task<LauncherContentSnapshot> LoadAsync(HttpClient http, CancellationToken token) =>
         Source.LoadAsync(http, token);
+
+    internal static async Task<LauncherContentSnapshot> LoadAsync(HttpClient http, CancellationToken token,
+        Func<string?> findVerifiedLauncherDirectory)
+    {
+        LauncherContentSnapshot? cached = await Task.Run(
+            () => ChinaLauncherContentCache.Read(findVerifiedLauncherDirectory, token), token).ConfigureAwait(false);
+        return cached ?? await LoadAsync(http, token).ConfigureAwait(false);
+    }
 }

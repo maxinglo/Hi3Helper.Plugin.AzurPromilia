@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')][string] $Repository,
     [Parameter(Mandatory)][string] $UpdateDirectory,
-    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')][string] $Version,
+    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string] $Version,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{40}$')][string] $Commit
 )
 
@@ -18,7 +18,9 @@ $expectedVersion = [version]$Version
 if ($expectedVersion.Revision -lt 0) {
     $expectedVersion = [version]::new($expectedVersion.Major, $expectedVersion.Minor, $expectedVersion.Build, 0)
 }
-if ([version]$manifest.PluginVersion -ne $expectedVersion) { throw 'Update manifest version does not match the installer tag.' }
+$manifestVersion = [version]$manifest.PluginVersion
+$normalizedVersion = [version]::new($manifestVersion.Major, $manifestVersion.Minor, $manifestVersion.Build, [Math]::Max(0, $manifestVersion.Revision))
+if ($normalizedVersion -ne $expectedVersion) { throw 'Update manifest version does not match the installer tag.' }
 
 $files = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($asset in $manifest.Assets) {

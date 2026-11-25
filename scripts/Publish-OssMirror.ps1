@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+(\.\d+)?$')][string] $Tag,
+    [Parameter(Mandatory)][ValidatePattern('^v\d+\.\d+\.\d+$')][string] $Tag,
     [Parameter(Mandatory)][string] $Installer,
     [Parameter(Mandatory)][string] $UpdateDirectory
 )
@@ -18,7 +18,9 @@ $manifestFile = Get-Item -LiteralPath (Join-Path $UpdateDirectory 'manifest.json
 $manifest = Get-Content -LiteralPath $manifestFile.FullName -Raw | ConvertFrom-Json
 $version = [version]$Tag.Substring(1)
 $expectedVersion = [version]::new($version.Major, $version.Minor, $version.Build, [Math]::Max(0, $version.Revision))
-if ([version]$manifest.PluginVersion -ne $expectedVersion) { throw 'Update manifest version differs from the release tag.' }
+$manifestVersion = [version]$manifest.PluginVersion
+$normalizedVersion = [version]::new($manifestVersion.Major, $manifestVersion.Minor, $manifestVersion.Build, [Math]::Max(0, $manifestVersion.Revision))
+if ($normalizedVersion -ne $expectedVersion) { throw 'Update manifest version differs from the release tag.' }
 
 $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $files = foreach ($asset in $manifest.Assets) {

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>x64</Platforms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>AzurPromilia</AssemblyName>
+    <Version>0.1.0</Version>
+    <Authors>Maxing</Authors>
+    <Description>Open the official Azur Promilia launchers for China and Japan from Collapse Launcher.</Description>
+    <DebugType>embedded</DebugType>
+    <Deterministic>true</Deterministic>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CA2256</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj" />
+    <InternalsVisibleTo Include="Hi3Helper.Plugin.AzurPromilia.Tests" />
+  </ItemGroup>
+  <Target Name="GeneratePluginVersion" BeforeTargets="CoreCompile" DependsOnTargets="GetAssemblyVersion">
+    <WriteLinesToFile File="$(IntermediateOutputPath)PluginVersion.g.cs"
+                      Lines="namespace Hi3Helper.Plugin.AzurPromilia%3B internal static class PluginVersion { internal static readonly Hi3Helper.Plugin.Core.Management.GameVersion Current = new(&quot;$(AssemblyVersion)&quot;)%3B }"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)PluginVersion.g.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -1,0 +1,44 @@
+name: Build Azur Promilia plugin
+
+on:
+  push:
+    branches: [main, preview, stable]
+  pull_request:
+    branches: [main, preview, stable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Run the launcher integration tests
+        shell: pwsh
+        run: dotnet run --project tests/Hi3Helper.Plugin.AzurPromilia.Tests -c Release -p:Platform=x64 -p:RestoreLockedMode=true
+      - name: Build, check the native ABI, and package
+        shell: pwsh
+        run: ./scripts/Publish.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: artifacts/packages/AzurPromilia_*.zip
+          archive: false
+          if-no-files-found: error
+          retention-days: 14

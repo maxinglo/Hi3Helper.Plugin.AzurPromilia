@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj" />
+  <Project Path="src/Hi3Helper.Plugin.AzurPromilia/Hi3Helper.Plugin.AzurPromilia.csproj" />
+  <Project Path="tests/Hi3Helper.Plugin.AzurPromilia.Tests/Hi3Helper.Plugin.AzurPromilia.Tests.csproj" />
+</Solution>

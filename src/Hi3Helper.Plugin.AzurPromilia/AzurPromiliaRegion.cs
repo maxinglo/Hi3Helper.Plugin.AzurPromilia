@@ -1,4 +1,5 @@
 using Hi3Helper.Plugin.AzurPromilia.Content;
+using Hi3Helper.Plugin.AzurPromilia.GameData;
 
 namespace Hi3Helper.Plugin.AzurPromilia;
 
@@ -22,7 +23,9 @@ internal sealed record AzurPromiliaRegion(
     Func<HttpClient, CancellationToken, Task<LauncherContentSnapshot>> LoadContent,
     OfficialLauncherIdentity? Launcher = null,
     string? TraditionalChineseName = null,
-    string? KoreanName = null)
+    string? KoreanName = null,
+    string? NativeGameExecutable = null,
+    Func<HttpClient, CancellationToken, Task<GameInstallPlan>>? LoadGameInstallPlan = null)
 {
     internal static AzurPromiliaRegion China { get; } = new(
         "AzurPromiliaCN", "China", "国服", "中国版", "zh-CN", "Manjuu",
@@ -32,7 +35,8 @@ internal sealed record AzurPromiliaRegion(
         ChinaLauncherContentSource.LoadAsync,
         new OfficialLauncherIdentity("launcher.exe", "蓝色星原：旅谣", "上海蛮奈网络科技有限公司",
             UninstallKey: "AzurPromilia_35_C000", VersionedDirectory: true),
-        TraditionalChineseName: "陸服", KoreanName: "중국");
+        TraditionalChineseName: "陸服", KoreanName: "중국",
+        NativeGameExecutable: "AzurPromilia.exe");
 
     internal static AzurPromiliaRegion Japan { get; } = new(
         "AzurPromiliaJP", "Japan", "日服", "日本版", "ja-JP", "Yostar",

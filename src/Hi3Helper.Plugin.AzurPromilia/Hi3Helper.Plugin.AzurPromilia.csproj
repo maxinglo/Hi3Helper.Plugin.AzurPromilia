@@ -1,3 +1,4 @@
+<!-- Plugin versions and release packages use x.x.x without a fourth build number. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net11.0-windows</TargetFramework>
@@ -10,9 +11,9 @@
     <NativeLib>Shared</NativeLib>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>AzurPromilia</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Maxing</Authors>
-    <Description>Open the official Azur Promilia launchers for China and Japan from Collapse Launcher.</Description>
+    <Description>Download, update, verify and launch the China, Japan and Taiwan editions of Azur Promilia in Collapse Launcher.</Description>
     <DebugType>embedded</DebugType>
     <Deterministic>true</Deterministic>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -21,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj" />
     <InternalsVisibleTo Include="Hi3Helper.Plugin.AzurPromilia.Tests" />
+    <EmbeddedResource Include="Assets/*.png" LogicalName="AzurPromilia.Social.%(Filename)%(Extension)" />
   </ItemGroup>
   <Target Name="GeneratePluginVersion" BeforeTargets="CoreCompile" DependsOnTargets="GetAssemblyVersion">
     <WriteLinesToFile File="$(IntermediateOutputPath)PluginVersion.g.cs"

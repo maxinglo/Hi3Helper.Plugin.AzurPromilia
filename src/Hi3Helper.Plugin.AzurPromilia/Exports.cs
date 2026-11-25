@@ -13,25 +13,30 @@ public sealed class Exports : SharedStaticV1Ext<Exports>
     [UnmanagedCallersOnly(EntryPoint = "TryGetApiExport", CallConvs = [typeof(CallConvCdecl)])]
     public static unsafe int TryGetApiExport(char* name, void** result) => TryGetApiExportPointer(name, result);
 
-    // Collapse's custom game arguments and priority settings do not apply to the publisher's launcher process.
     protected override (bool IsSupported, Task<bool> Task) LaunchGameFromGameManagerCoreAsync(
         GameManagerExtension.RunGameFromGameManagerContext context, string? arguments, bool boosted,
-        ProcessPriorityClass priority, CancellationToken token) => (true, Task.Run(() =>
-        {
-            token.ThrowIfCancellationRequested();
-            ((OfficialLauncherManager)context.GameManager).OpenOfficialLauncher();
-            return true;
-        }, token));
+        ProcessPriorityClass priority, CancellationToken token) => (true,
+        ((OfficialLauncherManager)context.GameManager).LaunchGameAsync(arguments, boosted, priority, token));
 
     // Collapse checks this callback to decide whether to use the plugin's Play action.
     protected override bool IsGameRunningCore(GameManagerExtension.RunGameFromGameManagerContext context,
         out bool running, out DateTime started)
     {
-        running = false;
-        started = default;
+        using InstalledGameProcess? game = InstalledGameProcess.Find(((OfficialLauncherManager)context.GameManager).GetInstalledExecutablePath());
+        running = game is not null;
+        started = game?.Started ?? default;
         return true;
     }
 
     protected override (bool IsSupported, Task<bool> Task) WaitRunningGameCoreAsync(
-        GameManagerExtension.RunGameFromGameManagerContext context, CancellationToken token) => (true, Task.FromResult(true));
+        GameManagerExtension.RunGameFromGameManagerContext context, CancellationToken token) =>
+        (true, WaitForGameAsync(((OfficialLauncherManager)context.GameManager).GetInstalledExecutablePath(), token));
+
+    private static async Task<bool> WaitForGameAsync(string? executable, CancellationToken token)
+    {
+        using InstalledGameProcess? game = InstalledGameProcess.Find(executable);
+        if (game is not null)
+            await game.WaitForExitAsync(token).ConfigureAwait(false);
+        return true;
+    }
 }

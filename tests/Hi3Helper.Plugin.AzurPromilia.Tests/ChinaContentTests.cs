@@ -29,6 +29,21 @@ internal static class ChinaContentTests
         using var emptyHttp = new HttpClient(new FixtureHandler(newsJson: """{"code":0,"data":{"rows":[]}}"""));
         snapshot = await ChinaLauncherContentSource.LoadAsync(emptyHttp, CancellationToken.None);
         Require(snapshot.NewsLoaded && snapshot.News.Length == 0, "An empty official feed must clear old news.");
+
+        var website = new LauncherContentSnapshot(
+            [new("Website event", "https://azurpromilia.manjuu.com/home/news/detail/1/", "11/26", LauncherNewsEntryType.Event),
+             new("Website notice", "https://azurpromilia.manjuu.com/home/news/detail/2/", "11/26", LauncherNewsEntryType.Notice)],
+            [], []);
+        var cached = new LauncherContentSnapshot(
+            [new("Official site", "https://azurpromilia.manjuu.com/home/", "11/24", LauncherNewsEntryType.Info)],
+            [new("https://l1-all-plat-server.manjuu.com/azurpromilia/img/banner.png", "", "Launcher banner")], []);
+        snapshot = ChinaLauncherContentSource.Combine(website, cached);
+        Require(snapshot.NewsLoaded && snapshot.News.SequenceEqual(website.News.Concat(cached.News)) &&
+                snapshot.Carousel.SequenceEqual(cached.Carousel),
+            "Launcher cache with only Info must preserve the website's Events and Notices alongside launcher artwork.");
+        snapshot = ChinaLauncherContentSource.Combine(website with { News = [], NewsLoaded = false }, cached);
+        Require(!snapshot.NewsLoaded && snapshot.CarouselLoaded,
+            "A website outage must retain the previously displayed Events and Notices instead of replacing them with cached Info.");
     }
 
     private static void Require(bool condition, string message)

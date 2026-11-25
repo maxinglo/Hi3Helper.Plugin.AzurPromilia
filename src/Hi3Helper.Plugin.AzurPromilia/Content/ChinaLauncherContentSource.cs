@@ -1,3 +1,5 @@
+using Hi3Helper.Plugin.Core.Management;
+
 namespace Hi3Helper.Plugin.AzurPromilia.Content;
 
 internal static class ChinaLauncherContentSource
@@ -19,11 +21,20 @@ internal static class ChinaLauncherContentSource
     internal static Task<LauncherContentSnapshot> LoadAsync(HttpClient http, CancellationToken token) =>
         Source.LoadAsync(http, token);
 
+    // Keep Events and Notices from the official website when adding the launcher's cached artwork and Info entries.
     internal static async Task<LauncherContentSnapshot> LoadAsync(HttpClient http, CancellationToken token,
         Func<string?> findVerifiedLauncherDirectory)
     {
+        Task<LauncherContentSnapshot> website = LoadAsync(http, token);
         LauncherContentSnapshot? cached = await Task.Run(
             () => ChinaLauncherContentCache.Read(findVerifiedLauncherDirectory, token), token).ConfigureAwait(false);
-        return cached ?? await LoadAsync(http, token).ConfigureAwait(false);
+        return Combine(await website.ConfigureAwait(false), cached);
     }
+
+    internal static LauncherContentSnapshot Combine(LauncherContentSnapshot website, LauncherContentSnapshot? cached) =>
+        cached is null ? website : new LauncherContentSnapshot(
+            website.News.Where(item => item.Type is LauncherNewsEntryType.Event or LauncherNewsEntryType.Notice)
+                .Concat(cached.News.Where(item => item.Type == LauncherNewsEntryType.Info))
+                .DistinctBy(item => item.Url).ToArray(),
+            cached.Carousel, cached.Social, NewsLoaded: website.NewsLoaded, CarouselLoaded: cached.CarouselLoaded);
 }

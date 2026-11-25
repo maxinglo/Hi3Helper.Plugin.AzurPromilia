@@ -68,7 +68,13 @@ internal sealed class ManjuuWebsiteContentSource(
                     articleImages.Add(new(cover, url, title));
             }
 
-            return new([.. entries], [.. articleImages]);
+            return entries.Count == 0 && rows.GetArrayLength() != 0
+                ? null
+                : new([.. entries], [.. articleImages]);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            return null;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException)
         {
@@ -93,7 +99,11 @@ internal sealed class ManjuuWebsiteContentSource(
                     result.Add(new(image, IsHttps(link) ? link : "", Text(banner, "title")));
             }
 
-            return [.. result];
+            return result.Count == 0 && data.GetArrayLength() != 0 ? null : [.. result];
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            return null;
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException)
         {
@@ -104,6 +114,8 @@ internal sealed class ManjuuWebsiteContentSource(
     // The public websites send a timestamp and an unkeyed checksum on anonymous editorial requests.
     private async Task<JsonDocument> GetAsync(HttpClient http, string path, string query, CancellationToken token)
     {
+        using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        requestTimeout.CancelAfter(TimeSpan.FromSeconds(6));
         string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
         string checksum = Convert.ToHexStringLower(MD5.HashData(Encoding.UTF8.GetBytes(timestamp + query)));
         using var request = new HttpRequestMessage(HttpMethod.Get, apiBase + path + (query.Length > 0 ? "?" + query : ""));
@@ -111,10 +123,11 @@ internal sealed class ManjuuWebsiteContentSource(
         request.Headers.TryAddWithoutValidation("sign", checksum);
         request.Headers.TryAddWithoutValidation("lang", language);
         request.Headers.TryAddWithoutValidation("sdk-version", "2.4.1");
-        using HttpResponseMessage response = await http.SendAsync(request, token).ConfigureAwait(false);
+        using HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+            requestTimeout.Token).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        await using Stream stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: token).ConfigureAwait(false);
+        await using Stream stream = await response.Content.ReadAsStreamAsync(requestTimeout.Token).ConfigureAwait(false);
+        return await JsonDocument.ParseAsync(stream, cancellationToken: requestTimeout.Token).ConfigureAwait(false);
     }
 
     private static bool TryGetData(JsonElement root, out JsonElement data)

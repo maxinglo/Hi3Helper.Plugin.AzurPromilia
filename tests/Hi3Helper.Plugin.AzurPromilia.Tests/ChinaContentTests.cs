@@ -18,8 +18,17 @@ internal static class ChinaContentTests
 
         using var partialHttp = new HttpClient(new FixtureHandler(failNews: true));
         snapshot = await ChinaLauncherContentSource.LoadAsync(partialHttp, CancellationToken.None);
-        Require(snapshot.News.Length == 0 && snapshot.Carousel.Length == 1 && snapshot.Social.Length == 5,
+        Require(!snapshot.NewsLoaded && snapshot.CarouselLoaded && snapshot.News.Length == 0 &&
+                snapshot.Carousel.Length == 1 && snapshot.Social.Length == 5,
             "A news outage should not hide banners or social links.");
+
+        using var malformedHttp = new HttpClient(new FixtureHandler(newsJson: """{"code":0,"data":{"rows":[{}]}}"""));
+        snapshot = await ChinaLauncherContentSource.LoadAsync(malformedHttp, CancellationToken.None);
+        Require(!snapshot.NewsLoaded && snapshot.CarouselLoaded, "Malformed items must not replace the last good news.");
+
+        using var emptyHttp = new HttpClient(new FixtureHandler(newsJson: """{"code":0,"data":{"rows":[]}}"""));
+        snapshot = await ChinaLauncherContentSource.LoadAsync(emptyHttp, CancellationToken.None);
+        Require(snapshot.NewsLoaded && snapshot.News.Length == 0, "An empty official feed must clear old news.");
     }
 
     private static void Require(bool condition, string message)
@@ -27,7 +36,7 @@ internal static class ChinaContentTests
         if (!condition) throw new InvalidOperationException(message);
     }
 
-    private sealed class FixtureHandler(bool failNews = false) : HttpMessageHandler
+    private sealed class FixtureHandler(bool failNews = false, string? newsJson = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -37,7 +46,7 @@ internal static class ChinaContentTests
             Require(request.Headers.GetValues("sign").Single() == expected, "Website request signature must match the public format.");
             bool isNews = request.RequestUri.AbsolutePath.EndsWith("pagelatestlist", StringComparison.Ordinal);
             string json = isNews
-                ? """{"code":0,"data":{"rows":[{"id":"912088789906755584","title":"Notice","type":"notice","startTime":1795503600000}]}}"""
+                ? newsJson ?? """{"code":0,"data":{"rows":[{"id":"912088789906755584","title":"Notice","type":"notice","startTime":1795503600000}]}}"""
                 : """{"code":0,"data":[{"imageUrl":"https://example.invalid/banner.png"}]}""";
             return Task.FromResult(isNews && failNews
                 ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
